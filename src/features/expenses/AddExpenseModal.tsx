@@ -9,6 +9,7 @@ type AddExpenseModalProps = {
   group: Group;
   initialExpense?: Expense;
   mode?: "create" | "edit";
+  titleBadges?: string[];
   onClose: () => void;
   onCreate: (expense: Expense) => void;
   onAddMember: (member: Member) => Promise<Member>;
@@ -27,8 +28,6 @@ function readImageAsDataUrl(file: File): Promise<string> {
   });
 }
 
-const titleBadges = ["Cà phê", "Ăn xế", "Bánh mì", "Chè"];
-
 function createTempMember(name: string): Member {
   return {
     id: `temp:${encodeURIComponent(name)}:${Date.now()}`,
@@ -36,7 +35,15 @@ function createTempMember(name: string): Member {
   };
 }
 
-export function AddExpenseModal({ group, initialExpense, mode = "create", onClose, onCreate, onAddMember }: AddExpenseModalProps) {
+export function AddExpenseModal({
+  group,
+  initialExpense,
+  mode = "create",
+  titleBadges = [],
+  onClose,
+  onCreate,
+  onAddMember
+}: AddExpenseModalProps) {
   const [step, setStep] = useState(1);
   const [imageUrl, setImageUrl] = useState<string | undefined>(initialExpense?.imageUrl);
   const [title, setTitle] = useState(initialExpense?.title ?? "");

@@ -1,7 +1,63 @@
 export type Member = {
   id: string;
   name: string;
+  userId?: string;
 };
+
+export type User = {
+  id: string;
+  email: string;
+  username: string;
+  displayName: string;
+  avatarUrl?: string;
+};
+
+export type BillTitleTemplate = {
+  id: string;
+  label: string;
+  position: number;
+};
+
+export type Friend = {
+  userId: string;
+  username: string;
+  displayName: string;
+  avatarUrl?: string;
+  isFavorite: boolean;
+};
+
+export type FriendRequest = {
+  id: string;
+  userId: string;
+  username: string;
+  displayName: string;
+  avatarUrl?: string;
+  createdAt: string;
+};
+
+export type FriendRequests = {
+  incoming: FriendRequest[];
+  outgoing: FriendRequest[];
+};
+
+export type FriendRelationship = "none" | "friend" | "pending_outgoing" | "pending_incoming";
+
+export type FriendSearchResult = {
+  userId: string;
+  username: string;
+  displayName: string;
+  avatarUrl?: string;
+  relationship: FriendRelationship;
+};
+
+export type Contact = {
+  id: string;
+  name: string;
+  avatarUrl?: string;
+  isFavorite: boolean;
+};
+
+export type FavoriteTargetType = "user" | "contact";
 
 export type Group = {
   id: string;
