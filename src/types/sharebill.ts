@@ -1,9 +1,3 @@
-export type Member = {
-  id: string;
-  name: string;
-  userId?: string;
-};
-
 export type User = {
   id: string;
   email: string;
@@ -59,15 +53,31 @@ export type Contact = {
 
 export type FavoriteTargetType = "user" | "contact";
 
+// A participant is anyone who can pay for or share an expense: the current
+// user, a friend (both have accounts -> "user:<id>"), or a contact
+// (account-less -> "contact:<id>").
+export type ParticipantType = "user" | "contact";
+
+export type Participant = {
+  participantId: string;
+  name: string;
+  avatarUrl?: string;
+  type: ParticipantType;
+};
+
+export type GroupMember = Participant;
+
 export type Group = {
   id: string;
   name: string;
-  members: Member[];
+  members: GroupMember[];
 };
 
 export type PayerContribution = {
   memberId: string;
   amount: number;
+  name?: string;
+  avatarUrl?: string;
 };
 
 export type ParticipantShare = {
@@ -75,13 +85,13 @@ export type ParticipantShare = {
   amount: number;
   isCustom: boolean;
   memberName?: string;
+  avatarUrl?: string;
 };
 
 export type SplitMode = "equal" | "custom";
 
 export type Expense = {
   id: string;
-  groupId: string;
   title: string;
   totalAmount: number;
   paidDate: string;
@@ -104,13 +114,13 @@ export type LedgerCycleStatus = "open" | "settled" | "archived_unpaid";
 
 export type LedgerCycle = {
   id: string;
-  groupId: string;
+  ownerUserId: string;
   status: LedgerCycleStatus;
   startDate: string;
   endDate?: string;
   createdAt: string;
   closedAt?: string;
-  closedByMemberId?: string;
+  closedByUserId?: string;
 };
 
 export type SettlementSnapshot = {
@@ -123,7 +133,6 @@ export type SettlementSnapshot = {
 };
 
 export type AuditAction =
-  | "ledger.created"
   | "ledger.settled"
   | "ledger.archived"
   | "expense.created"
@@ -131,19 +140,14 @@ export type AuditAction =
   | "expense.deleted"
   | "settlement.adjusted"
   | "settlement.marked_paid"
-  | "settlement.marked_unpaid"
-  | "member.created"
-  | "group.created"
-  | "group.updated"
-  | "group.deleted";
+  | "settlement.marked_unpaid";
 
 export type AuditLogEntry = {
   id: string;
-  groupId: string;
+  ownerUserId: string;
   ledgerCycleId?: string;
-  actorMemberId: string;
   action: AuditAction;
-  entityType: "ledger_cycle" | "expense" | "settlement" | "member" | "group";
+  entityType: "ledger_cycle" | "expense" | "settlement";
   entityId: string;
   summary: string;
   before?: unknown;

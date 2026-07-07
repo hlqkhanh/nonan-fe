@@ -6,7 +6,6 @@ import { calculateSettlements } from "./settlements.js";
 function expense(overrides: Partial<Expense>): Expense {
   return {
     id: "expense-1",
-    groupId: "group-1",
     title: "Dinner",
     totalAmount: 90000,
     paidDate: "2026-07-03",

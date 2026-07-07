@@ -1,17 +1,18 @@
 import { useState } from "react";
-import type { Group, LedgerCycle, LedgerCycleDetail } from "../../types/sharebill";
+import type { LedgerCycle, LedgerCycleDetail } from "../../types/sharebill";
+import type { ParticipantMap } from "../../lib/participants";
 import { getLedgerCycleDetail } from "../../data/api";
 import { LedgerDetailModal } from "../settlements/LedgerDetailModal";
 import { ChevronRight, CalendarClock, ReceiptText, RefreshCcw } from "lucide-react";
 
 type LedgerPageProps = {
-  group: Group;
+  participantMap: ParticipantMap;
   cycles: LedgerCycle[];
   currentCycleId: string;
   currentMemberId: string;
 };
 
-export function LedgerPage({ group, cycles, currentCycleId, currentMemberId }: LedgerPageProps) {
+export function LedgerPage({ participantMap, cycles, currentCycleId, currentMemberId }: LedgerPageProps) {
   const [selectedDetail, setSelectedDetail] = useState<LedgerCycleDetail | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -20,7 +21,7 @@ export function LedgerPage({ group, cycles, currentCycleId, currentMemberId }: L
   async function openDetail(cycleId: string) {
     setLoading(true);
     try {
-      const detail = await getLedgerCycleDetail(group.id, cycleId);
+      const detail = await getLedgerCycleDetail(cycleId);
       if (detail) {
         setSelectedDetail(detail);
       }
@@ -53,6 +54,7 @@ export function LedgerPage({ group, cycles, currentCycleId, currentMemberId }: L
           {pastCycles.map((cycle) => (
             <button
               key={cycle.id}
+              type="button"
               className="flex w-full items-center justify-between rounded-[12px] border border-white/10 bg-white/[0.04] p-4 text-left transition-colors hover:bg-white/[0.06] active:scale-[0.98]"
               onClick={() => openDetail(cycle.id)}
               disabled={loading}
@@ -83,9 +85,9 @@ export function LedgerPage({ group, cycles, currentCycleId, currentMemberId }: L
 
       {selectedDetail && (
         <LedgerDetailModal
-          group={group}
+          participantMap={participantMap}
           detail={selectedDetail}
-          settlements={selectedDetail.settlements as any} 
+          settlements={selectedDetail.settlements}
           currentMemberId={currentMemberId}
           onClose={() => setSelectedDetail(null)}
           readonly={true}

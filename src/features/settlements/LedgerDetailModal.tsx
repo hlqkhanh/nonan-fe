@@ -1,10 +1,11 @@
-import { X, Calendar, ReceiptText, Activity, Check, CheckCircle2 } from "lucide-react";
+import { CheckCircle2, Check, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { formatVnd } from "../../lib/money/format";
-import type { Group, LedgerCycleDetail, Settlement, SettlementSnapshot } from "../../types/sharebill";
+import { participantAvatar, participantName, type ParticipantMap } from "../../lib/participants";
+import type { LedgerCycleDetail, Settlement, SettlementSnapshot } from "../../types/sharebill";
 
 type LedgerDetailModalProps = {
-  group: Group;
+  participantMap: ParticipantMap;
   detail: LedgerCycleDetail;
   settlements: Settlement[] | SettlementSnapshot[];
   currentMemberId: string;
@@ -14,19 +15,13 @@ type LedgerDetailModalProps = {
 
 type LedgerTab = "transactions" | "balances" | "bills" | "activity";
 
-export function LedgerDetailModal({ group, detail, settlements, currentMemberId, onClose, readonly }: LedgerDetailModalProps) {
+export function LedgerDetailModal({ participantMap, detail, settlements, currentMemberId, onClose, readonly }: LedgerDetailModalProps) {
   const [activeTab, setActiveTab] = useState<LedgerTab>("transactions");
 
   const sortedExpenses = [...detail.expenses].sort((a, b) => b.paidDate.localeCompare(a.paidDate));
 
   function getMemberName(memberId: string) {
-    const member = group.members.find(m => m.id === memberId);
-    if (member) return member.name;
-    if (memberId.startsWith("temp:")) {
-      const parts = memberId.split(":");
-      if (parts.length > 1) return decodeURIComponent(parts[1]);
-    }
-    return memberId;
+    return participantName(participantMap, memberId);
   }
 
   function getStatusLabel(status: string) {
@@ -90,7 +85,7 @@ export function LedgerDetailModal({ group, detail, settlements, currentMemberId,
               </span>
             </div>
           </div>
-          <button className="grid h-10 w-10 place-items-center rounded-full bg-white/[0.06] transition-colors hover:bg-white/10" type="button" onClick={onClose}>
+          <button className="grid h-10 w-10 place-items-center rounded-full bg-white/[0.06] transition-colors hover:bg-white/10" type="button" title="Đóng" onClick={onClose}>
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -146,7 +141,7 @@ export function LedgerDetailModal({ group, detail, settlements, currentMemberId,
                     >
                       <div className="flex flex-col items-center gap-1 z-10 w-[60px]">
                         <div className="relative h-10 w-10 overflow-hidden rounded-full border-2 border-white/20 bg-white/10 shadow-lg">
-                          <img src={`https://api.dicebear.com/7.x/notionists/svg?seed=${fromName}`} alt={fromName} className="h-full w-full object-cover" />
+                          <img src={participantAvatar(participantMap, settlement.fromMemberId)} alt={fromName} className="h-full w-full object-cover" />
                         </div>
                         <span className="truncate text-[11px] font-bold text-white drop-shadow-md">{fromName.split(" ")[0]}</span>
                       </div>
@@ -162,6 +157,7 @@ export function LedgerDetailModal({ group, detail, settlements, currentMemberId,
                           <button
                             className={`grid shrink-0 h-7 w-7 place-items-center rounded-full border border-white/40 bg-white/[0.05] transition-colors ${settlement.paid ? "text-mint border-mint" : "text-mint/70"} ${readonly ? "opacity-70 cursor-default" : ""}`}
                             type="button"
+                            title={settlement.paid ? "Đã trả" : "Chưa trả"}
                             disabled={readonly}
                           >
                             <Check className="h-3.5 w-3.5" />
@@ -176,7 +172,7 @@ export function LedgerDetailModal({ group, detail, settlements, currentMemberId,
 
                       <div className="flex flex-col items-center gap-1 z-10 w-[60px]">
                         <div className="relative h-10 w-10 overflow-hidden rounded-full border-2 border-white/20 bg-white/10 shadow-lg">
-                          <img src={`https://api.dicebear.com/7.x/notionists/svg?seed=${toName}`} alt={toName} className="h-full w-full object-cover" />
+                          <img src={participantAvatar(participantMap, settlement.toMemberId)} alt={toName} className="h-full w-full object-cover" />
                         </div>
                         <span className="truncate text-[11px] font-bold text-white drop-shadow-md">{toName.split(" ")[0]}</span>
                       </div>
@@ -243,7 +239,7 @@ export function LedgerDetailModal({ group, detail, settlements, currentMemberId,
                           <div className="text-xs">
                             <span className="text-white/60">Người trả: </span>
                             <span className="text-white/80">
-                              {expense.payers.map(p => `${getMemberName(p.memberId)} (${formatVnd(p.amount)})`).join(", ")}
+                              {expense.payers.map(p => `${p.name ?? getMemberName(p.memberId)} (${formatVnd(p.amount)})`).join(", ")}
                             </span>
                           </div>
                         </div>
@@ -251,7 +247,7 @@ export function LedgerDetailModal({ group, detail, settlements, currentMemberId,
                       <div className="border-t border-white/10 pt-2 text-xs">
                         <span className="text-white/60">Chia cho: </span>
                         <span className="text-white/80">
-                          {expense.participants.map(p => `${p.memberName || getMemberName(p.memberId)} (${formatVnd(p.amount)}${p.isCustom ? " custom" : ""})`).join(", ")}
+                          {expense.participants.map(p => `${p.memberName ?? getMemberName(p.memberId)} (${formatVnd(p.amount)}${p.isCustom ? " custom" : ""})`).join(", ")}
                         </span>
                       </div>
                     </div>

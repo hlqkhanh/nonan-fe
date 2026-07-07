@@ -1,4 +1,4 @@
-import { ChevronRight, Contact as ContactIcon, KeyRound, LogOut, Pencil, Tags, Users } from "lucide-react";
+import { Boxes, ChevronRight, Contact as ContactIcon, KeyRound, LogOut, Pencil, Tags, Users } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
 import { changePassword, updateProfile } from "../../data/api";
@@ -10,13 +10,14 @@ import { ChangePasswordModal } from "./ChangePasswordModal";
 import { ContactsModal } from "./ContactsModal";
 import { EditProfileModal } from "./EditProfileModal";
 import { FriendsModal } from "./FriendsModal";
+import { GroupsModal } from "./GroupsModal";
 
 type ProfilePageProps = {
   billTemplates: BillTitleTemplate[];
   onSaveBillTemplates: (labels: string[]) => Promise<void>;
 };
 
-type ProfileModal = "avatar" | "edit" | "password" | "badges" | "friends" | "contacts" | null;
+type ProfileModal = "avatar" | "edit" | "password" | "badges" | "friends" | "contacts" | "groups" | null;
 
 export function ProfilePage({ billTemplates, onSaveBillTemplates }: ProfilePageProps) {
   const { user, logout, updateUser } = useAuth();
@@ -109,6 +110,16 @@ export function ProfilePage({ billTemplates, onSaveBillTemplates }: ProfilePageP
           <span className="flex-1 text-sm font-medium text-mist">Danh bạ tạm</span>
           <ChevronRight className="h-4 w-4 text-white/30" />
         </button>
+
+        <button
+          className="flex w-full items-center gap-3 rounded-[8px] border border-white/10 bg-white/[0.04] p-3 text-left"
+          type="button"
+          onClick={() => setOpenModal("groups")}
+        >
+          <Boxes className="h-4 w-4 text-white/50" />
+          <span className="flex-1 text-sm font-medium text-mist">Nhóm</span>
+          <ChevronRight className="h-4 w-4 text-white/30" />
+        </button>
       </div>
 
       <button
@@ -130,6 +141,7 @@ export function ProfilePage({ billTemplates, onSaveBillTemplates }: ProfilePageP
       )}
       {openModal === "friends" && <FriendsModal onClose={() => setOpenModal(null)} />}
       {openModal === "contacts" && <ContactsModal onClose={() => setOpenModal(null)} />}
+      {openModal === "groups" && <GroupsModal onClose={() => setOpenModal(null)} />}
     </div>
   );
 }

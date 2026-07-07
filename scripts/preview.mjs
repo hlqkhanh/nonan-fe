@@ -23,7 +23,7 @@ function proxyApi(clientRequest, clientResponse) {
     new URL(clientRequest.url, apiTarget),
     {
       method: clientRequest.method,
-      headers: clientRequest.headers
+      headers: { ...clientRequest.headers, host: apiTarget.host }
     },
     (upstreamResponse) => {
       clientResponse.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);

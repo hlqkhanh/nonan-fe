@@ -1,11 +1,12 @@
 import { Check, CheckCircle2, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { formatVnd, formatVndInput, parseVndInput } from "../../lib/money/format";
-import type { Group, Settlement, LedgerCycle, Expense, AuditLogEntry } from "../../types/sharebill";
+import { participantAvatar, participantName, type ParticipantMap } from "../../lib/participants";
+import type { Settlement, LedgerCycle, Expense, AuditLogEntry } from "../../types/sharebill";
 import { LedgerDetailModal } from "./LedgerDetailModal";
 
 type SettlementPanelProps = {
-  group: Group;
+  participantMap: ParticipantMap;
   ledgerCycle: LedgerCycle;
   expenses: Expense[];
   auditLogs: AuditLogEntry[];
@@ -25,20 +26,8 @@ type BalanceAdjustmentTarget = {
   amount: number;
 };
 
-function memberName(group: Group, memberId: string): string {
-  const member = group.members.find((item) => item.id === memberId);
-  if (member) return member.name;
-
-  if (memberId.startsWith("temp:")) {
-    const [, encodedName] = memberId.split(":");
-    return decodeURIComponent(encodedName ?? memberId);
-  }
-
-  return memberId;
-}
-
 export function SettlementPanel({
-  group,
+  participantMap,
   ledgerCycle,
   expenses,
   auditLogs,
@@ -57,6 +46,8 @@ export function SettlementPanel({
   const [adjustmentAmount, setAdjustmentAmount] = useState(0);
   const [counterpartyId, setCounterpartyId] = useState("");
   const [showDetail, setShowDetail] = useState(false);
+
+  const allParticipantIds = useMemo(() => Array.from(participantMap.keys()), [participantMap]);
 
   const youOwe = settlements
     .filter((settlement) => !settlement.paid && settlement.fromMemberId === currentMemberId)
@@ -110,7 +101,7 @@ export function SettlementPanel({
   function openBalanceAdjustment(balance: BalanceAdjustmentTarget) {
     const defaultCounterparty =
       balances.find((item) => !item.isFullyPaid && item.memberId !== balance.memberId && Math.sign(item.amount) !== Math.sign(balance.amount))?.memberId ??
-      group.members.find((member) => member.id !== balance.memberId)?.id ??
+      allParticipantIds.find((id) => id !== balance.memberId) ??
       "";
 
     setAdjustingBalance(balance);
@@ -156,21 +147,21 @@ export function SettlementPanel({
       </div>
 
       <div className="mt-4 grid grid-cols-3 gap-2">
-        <button 
-          className="h-10 rounded-[8px] bg-white/[0.05] text-sm font-semibold text-mist hover:bg-white/[0.08]" 
+        <button
+          className="h-10 rounded-[8px] bg-white/[0.05] text-sm font-semibold text-mist hover:bg-white/[0.08]"
           onClick={() => setShowDetail(true)}
         >
           Chi tiết
         </button>
-        <button 
-          className="h-10 rounded-[8px] bg-mist text-sm font-semibold text-ink disabled:opacity-50" 
+        <button
+          className="h-10 rounded-[8px] bg-mist text-sm font-semibold text-ink disabled:opacity-50"
           disabled={expenses.length === 0 && settlements.length === 0}
           onClick={onSettleLedger}
         >
           Tất toán
         </button>
-        <button 
-          className="h-10 rounded-[8px] border border-white/10 bg-transparent text-sm font-semibold text-white/60 hover:text-white disabled:opacity-50" 
+        <button
+          className="h-10 rounded-[8px] border border-white/10 bg-transparent text-sm font-semibold text-white/60 hover:text-white disabled:opacity-50"
           disabled={expenses.length === 0 && settlements.length === 0}
           onClick={onArchiveLedger}
         >
@@ -205,12 +196,12 @@ export function SettlementPanel({
           <div className="space-y-2">
             {settlements.length === 0 && (
               <div className="rounded-[8px] border border-white/10 bg-white/[0.04] p-4 text-sm text-white/55">
-                Nhóm hiện không có khoản nợ nào.
+                Bạn hiện không có khoản nợ nào.
               </div>
             )}
             {settlements.map((settlement) => {
-              const fromName = memberName(group, settlement.fromMemberId);
-              const toName = memberName(group, settlement.toMemberId);
+              const fromName = participantName(participantMap, settlement.fromMemberId);
+              const toName = participantName(participantMap, settlement.toMemberId);
               return (
                 <div
                   key={settlement.id}
@@ -222,7 +213,7 @@ export function SettlementPanel({
                 >
                   <div className="flex flex-col items-center gap-1 z-10 w-[60px]">
                     <div className="relative h-10 w-10 overflow-hidden rounded-full border-2 border-white/20 bg-white/10 shadow-lg">
-                      <img src={`https://api.dicebear.com/7.x/notionists/svg?seed=${fromName}`} alt={fromName} className="h-full w-full object-cover" />
+                      <img src={participantAvatar(participantMap, settlement.fromMemberId)} alt={fromName} className="h-full w-full object-cover" />
                     </div>
                     <span className="truncate text-[11px] font-bold text-white drop-shadow-md">{fromName.split(" ")[0]}</span>
                   </div>
@@ -263,7 +254,7 @@ export function SettlementPanel({
 
                   <div className="flex flex-col items-center gap-1 z-10 w-[60px]">
                     <div className="relative h-10 w-10 overflow-hidden rounded-full border-2 border-white/20 bg-white/10 shadow-lg">
-                      <img src={`https://api.dicebear.com/7.x/notionists/svg?seed=${toName}`} alt={toName} className="h-full w-full object-cover" />
+                      <img src={participantAvatar(participantMap, settlement.toMemberId)} alt={toName} className="h-full w-full object-cover" />
                     </div>
                     <span className="truncate text-[11px] font-bold text-white drop-shadow-md">{toName.split(" ")[0]}</span>
                   </div>
@@ -277,7 +268,7 @@ export function SettlementPanel({
           <div className="space-y-2">
             {balances.length === 0 && (
               <div className="rounded-[8px] border border-white/10 bg-white/[0.04] p-4 text-sm text-white/55">
-                Nhóm đang cân bằng, không có số dư âm dương.
+                Bạn đang cân bằng, không có số dư âm dương.
               </div>
             )}
             {balances.map((balance) => {
@@ -289,7 +280,7 @@ export function SettlementPanel({
                     }`}
                 >
                   <span className={`min-w-0 flex-1 truncate text-sm font-medium ${balance.isFullyPaid ? "text-white/40 line-through" : "text-mist"}`}>
-                    {memberName(group, balance.memberId)}
+                    {participantName(participantMap, balance.memberId)}
                   </span>
                   <span className={`text-sm font-semibold ${balance.isFullyPaid ? "text-white/40 line-through" : displayAmount < 0 ? "text-coral" : "text-mint"
                     }`}>
@@ -342,8 +333,8 @@ export function SettlementPanel({
               <p className="text-xs text-white/45">Điều chỉnh sổ nợ</p>
               <h3 className="mt-1 text-lg font-semibold text-mist">
                 {adjustingSettlement
-                  ? `${memberName(group, adjustingSettlement.fromMemberId)} trả ${memberName(group, adjustingSettlement.toMemberId)}`
-                  : `${memberName(group, adjustingBalance!.memberId)} ${adjustingBalance!.amount < 0 ? "đang âm" : "đang dương"
+                  ? `${participantName(participantMap, adjustingSettlement.fromMemberId)} trả ${participantName(participantMap, adjustingSettlement.toMemberId)}`
+                  : `${participantName(participantMap, adjustingBalance!.memberId)} ${adjustingBalance!.amount < 0 ? "đang âm" : "đang dương"
                   }`}
               </h3>
             </div>
@@ -365,18 +356,18 @@ export function SettlementPanel({
                     .filter((balance) => !balance.isFullyPaid && balance.memberId !== adjustingBalance.memberId)
                     .map((balance) => (
                       <option className="bg-ink text-mist" key={balance.memberId} value={balance.memberId}>
-                        {memberName(group, balance.memberId)} {balance.amount > 0 ? "+" : "-"}
+                        {participantName(participantMap, balance.memberId)} {balance.amount > 0 ? "+" : "-"}
                         {formatVnd(Math.abs(balance.amount))}
                       </option>
                     ))}
-                  {group.members
+                  {allParticipantIds
                     .filter(
-                      (member) =>
-                        member.id !== adjustingBalance.memberId && !balances.some((balance) => !balance.isFullyPaid && balance.memberId === member.id)
+                      (id) =>
+                        id !== adjustingBalance.memberId && !balances.some((balance) => !balance.isFullyPaid && balance.memberId === id)
                     )
-                    .map((member) => (
-                      <option className="bg-ink text-mist" key={member.id} value={member.id}>
-                        {member.name}
+                    .map((id) => (
+                      <option className="bg-ink text-mist" key={id} value={id}>
+                        {participantName(participantMap, id)}
                       </option>
                     ))}
                 </select>
@@ -439,13 +430,13 @@ export function SettlementPanel({
       )}
 
       {showDetail && (
-        <LedgerDetailModal 
-          group={group} 
-          detail={{ cycle: ledgerCycle, expenses, auditLogs, settlements: [] }} 
-          settlements={settlements} 
+        <LedgerDetailModal
+          participantMap={participantMap}
+          detail={{ cycle: ledgerCycle, expenses, auditLogs, settlements: [] }}
+          settlements={settlements}
           currentMemberId={currentMemberId}
-          onClose={() => setShowDetail(false)} 
-          readonly={false} 
+          onClose={() => setShowDetail(false)}
+          readonly={false}
         />
       )}
     </section>

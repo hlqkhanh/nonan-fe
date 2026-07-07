@@ -1,9 +1,6 @@
-import { Home, NotebookTabs, Plus, RefreshCw, User } from "lucide-react";
+import { Home, NotebookTabs, Plus, RefreshCw, User as UserIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
-  addGroupMember,
-  getGroups,
-  createGroup,
   createExpense,
   getCurrentLedgerCycle,
   getLedgerCycles,
@@ -14,19 +11,21 @@ import {
   updateExpense,
   deleteExpense,
   getBillTemplates,
-  saveBillTemplates
+  saveBillTemplates,
+  getFriends,
+  getContacts,
+  getGroups
 } from "../data/api";
 import { useAuth } from "../auth/AuthContext";
 import { AuthScreen } from "../features/auth/AuthScreen";
 import { ExpenseList } from "../features/expenses/ExpenseList";
 import { AddExpenseModal } from "../features/expenses/AddExpenseModal";
-import { GroupPicker } from "../features/groups/GroupPicker";
-import { CreateGroupModal } from "../features/groups/CreateGroupModal";
 import { SettlementPanel } from "../features/settlements/SettlementPanel";
 import { WeeklyCalendar } from "../features/calendar/WeeklyCalendar";
 import { LedgerPage } from "../features/ledger/LedgerPage";
 import { ProfilePage } from "../features/profile/ProfilePage";
-import type { Expense, Group, Member, Settlement, LedgerCycleDetail, LedgerCycle, BillTitleTemplate } from "../types/sharebill";
+import { buildParticipantMap } from "../lib/participants";
+import type { Contact, Expense, Friend, Group, Settlement, LedgerCycleDetail, LedgerCycle, BillTitleTemplate } from "../types/sharebill";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -34,36 +33,33 @@ function todayIso(): string {
 
 export function App() {
   const { user, status } = useAuth();
-  const [groups, setGroups] = useState<Group[]>([]);
-  const [selectedGroupId, setSelectedGroupId] = useState("");
   const [currentLedgerDetail, setCurrentLedgerDetail] = useState<LedgerCycleDetail | null>(null);
   const [ledgerCycles, setLedgerCycles] = useState<LedgerCycle[]>([]);
   const [billTemplates, setBillTemplates] = useState<BillTitleTemplate[]>([]);
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
 
   const [selectedDate, setSelectedDate] = useState(todayIso());
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | undefined>(undefined);
-  const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [activeView, setActiveView] = useState<"home" | "ledger" | "profile">("home");
 
-  const selectedGroup = useMemo(
-    () => groups.find((group) => group.id === selectedGroupId) ?? groups[0],
-    [groups, selectedGroupId]
-  );
-  const currentMemberId = useMemo(
-    () => selectedGroup?.members.find((member) => member.userId === user?.id)?.id ?? selectedGroup?.members[0]?.id ?? "",
-    [selectedGroup, user]
-  );
+  const currentMemberId = user ? `user:${user.id}` : "";
+  const participantMap = useMemo(() => buildParticipantMap(user, friends, contacts, groups), [user, friends, contacts, groups]);
 
-  async function refresh(groupId = selectedGroupId) {
-    if (!groupId) return;
-    const [detail, cycles] = await Promise.all([
-      getCurrentLedgerCycle(groupId),
-      getLedgerCycles(groupId)
-    ]);
+  async function refresh() {
+    const [detail, cycles] = await Promise.all([getCurrentLedgerCycle(), getLedgerCycles()]);
     setCurrentLedgerDetail(detail);
     setLedgerCycles(cycles);
+  }
+
+  async function refreshDirectory() {
+    const [nextFriends, nextContacts, nextGroups] = await Promise.all([getFriends(), getContacts(), getGroups()]);
+    setFriends(nextFriends);
+    setContacts(nextContacts);
+    setGroups(nextGroups);
   }
 
   useEffect(() => {
@@ -71,20 +67,21 @@ export function App() {
 
     async function boot() {
       setIsLoading(true);
-      const [nextGroups, templates] = await Promise.all([getGroups(), getBillTemplates()]);
-      setGroups(nextGroups);
-      setBillTemplates(templates);
-      const firstGroupId = nextGroups[0]?.id ?? "";
-      setSelectedGroupId(firstGroupId);
-      if (firstGroupId) {
-        const [detail, cycles] = await Promise.all([
-          getCurrentLedgerCycle(firstGroupId),
-          getLedgerCycles(firstGroupId)
+      try {
+        const [detail, cycles, templates] = await Promise.all([
+          getCurrentLedgerCycle(),
+          getLedgerCycles(),
+          getBillTemplates().catch(() => [] as BillTitleTemplate[])
         ]);
         setCurrentLedgerDetail(detail);
         setLedgerCycles(cycles);
+        setBillTemplates(templates);
+        await refreshDirectory();
+      } catch (err) {
+        console.error("Boot failed:", err);
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
     }
 
     void boot();
@@ -95,61 +92,39 @@ export function App() {
     setBillTemplates(updated);
   }
 
-  async function handleGroupChange(groupId: string) {
-    setSelectedGroupId(groupId);
-    await refresh(groupId);
-  }
-
-  async function handleCreateGroup(name: string, memberNames: string[]) {
-    const group = await createGroup(name);
-    for (const memberName of memberNames) {
-      await addGroupMember(group.id, { id: crypto.randomUUID(), name: memberName });
-    }
-    const nextGroups = await getGroups();
-    setGroups(nextGroups);
-    setSelectedGroupId(group.id);
-    await refresh(group.id);
-    setShowCreateGroup(false);
-  }
-
   async function handleCreateOrUpdateExpense(expense: Expense) {
-    if (!selectedGroup) return;
     if (editingExpense) {
-      await updateExpense(selectedGroup.id, editingExpense.id, expense, currentMemberId);
+      await updateExpense(editingExpense.id, expense);
     } else {
-      await createExpense(selectedGroup.id, expense, currentMemberId);
+      await createExpense(expense);
     }
     setShowAddExpense(false);
     setEditingExpense(undefined);
     setSelectedDate(expense.paidDate);
-    await refresh(selectedGroup.id);
+    await refresh();
   }
 
   async function handleDeleteExpense(expenseId: string) {
-    if (!selectedGroup) return;
     if (confirm("Bạn có chắc muốn xóa bill này?")) {
-      await deleteExpense(selectedGroup.id, expenseId, currentMemberId);
-      await refresh(selectedGroup.id);
+      await deleteExpense(expenseId);
+      await refresh();
     }
   }
 
-  async function handleAddMember(member: Member) {
-    if (!selectedGroup) return member;
-    const updatedGroup = await addGroupMember(selectedGroup.id, member);
-    setGroups((current) => current.map((group) => (group.id === updatedGroup.id ? updatedGroup : group)));
-    return member;
+  function handleContactCreated(contact: Contact) {
+    setContacts((current) => [...current, contact]);
   }
 
   async function handleMarkPaid(settlementId: string) {
-    if (!selectedGroup || !currentLedgerDetail) return;
-    await markSettlementPaid(selectedGroup.id, settlementId, currentLedgerDetail.cycle.id, currentMemberId);
-    await refresh(selectedGroup.id);
+    if (!currentLedgerDetail) return;
+    await markSettlementPaid(currentLedgerDetail.cycle.id, settlementId);
+    await refresh();
   }
 
   async function handleAdjustSettlement(settlementId: string, deltaAmount: number) {
-    if (!selectedGroup || !currentLedgerDetail) return;
-    await adjustSettlement(selectedGroup.id, currentLedgerDetail.cycle.id, settlementId, deltaAmount, currentMemberId);
-    await refresh(selectedGroup.id);
+    if (!currentLedgerDetail) return;
+    await adjustSettlement(currentLedgerDetail.cycle.id, settlementId, deltaAmount);
+    await refresh();
   }
 
   if (status === "loading") {
@@ -173,18 +148,8 @@ export function App() {
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-xs uppercase tracking-[0.18em] text-white/38">ShareBill</p>
-            {selectedGroup && (
-              <GroupPicker groups={groups} selectedGroupId={selectedGroup.id} onSelectGroup={handleGroupChange} />
-            )}
+            <p className="truncate text-sm font-semibold text-mist">Sổ nợ của tôi</p>
           </div>
-          <button
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/10 bg-white/[0.06]"
-            type="button"
-            title="Tạo nhóm mới"
-            onClick={() => setShowCreateGroup(true)}
-          >
-            <Plus className="h-4 w-4 text-white/65" />
-          </button>
           <button
             className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/10 bg-white/[0.06]"
             type="button"
@@ -196,22 +161,7 @@ export function App() {
         </div>
       </header>
 
-      {isLoading ? (
-        <div className="grid min-h-[70vh] place-items-center text-sm text-white/45">Đang tải ShareBill...</div>
-      ) : !selectedGroup ? (
-        <div className="grid min-h-[70vh] place-items-center px-6 text-center">
-          <div>
-            <p className="mb-4 text-sm text-white/55">Bạn chưa có nhóm nào.</p>
-            <button
-              className="h-12 rounded-full bg-coral px-6 font-semibold text-white"
-              type="button"
-              onClick={() => setShowCreateGroup(true)}
-            >
-              Tạo nhóm đầu tiên
-            </button>
-          </div>
-        </div>
-      ) : !currentLedgerDetail ? (
+      {isLoading || !currentLedgerDetail ? (
         <div className="grid min-h-[70vh] place-items-center text-sm text-white/45">Đang tải ShareBill...</div>
       ) : (
         <div className="pb-24">
@@ -225,7 +175,7 @@ export function App() {
                 onDeleteExpense={handleDeleteExpense}
               />
               <SettlementPanel
-                group={selectedGroup}
+                participantMap={participantMap}
                 ledgerCycle={currentLedgerDetail.cycle}
                 expenses={currentLedgerDetail.expenses}
                 auditLogs={currentLedgerDetail.auditLogs}
@@ -236,13 +186,13 @@ export function App() {
                 onOpenDetail={() => { /* handled inside SettlementPanel */ }}
                 onSettleLedger={async () => {
                   if (confirm("Tất toán sổ nợ hiện tại và lưu vào lịch sử?")) {
-                    await settleCurrentLedgerCycle(selectedGroup.id, currentMemberId);
+                    await settleCurrentLedgerCycle();
                     await refresh();
                   }
                 }}
                 onArchiveLedger={async () => {
                   if (confirm("Lưu trữ khoản nợ chưa trả và bắt đầu sổ nợ mới?")) {
-                    await archiveCurrentLedgerCycle(selectedGroup.id, currentMemberId);
+                    await archiveCurrentLedgerCycle();
                     await refresh();
                   }
                 }}
@@ -252,7 +202,7 @@ export function App() {
 
           {activeView === "ledger" && (
             <LedgerPage
-              group={selectedGroup}
+              participantMap={participantMap}
               cycles={ledgerCycles}
               currentCycleId={currentLedgerDetail.cycle.id}
               currentMemberId={currentMemberId}
@@ -279,7 +229,6 @@ export function App() {
               className="grid h-[60px] w-[60px] place-items-center rounded-full border-[6px] border-ink bg-mist text-ink shadow-lg shadow-coral/10 transition-transform active:scale-95 disabled:opacity-50"
               type="button"
               title="Tạo Bill Mới"
-              disabled={!selectedGroup}
               onClick={() => { setEditingExpense(undefined); setShowAddExpense(true); }}
             >
               <Plus className="h-6 w-6" />
@@ -298,28 +247,24 @@ export function App() {
               className={`flex flex-col items-center justify-center transition-colors ${activeView === "profile" ? "text-mist" : "text-white/40 hover:text-mist"}`}
               onClick={() => setActiveView("profile")}
             >
-              <User className="h-6 w-6" />
+              <UserIcon className="h-6 w-6" />
             </button>
           </div>
         </div>
       </div>
 
-      {showAddExpense && selectedGroup && (
+      {showAddExpense && user && (
         <AddExpenseModal
-          group={selectedGroup}
           initialExpense={editingExpense}
           mode={editingExpense ? "edit" : "create"}
           titleBadges={billTemplates.map((template) => template.label)}
+          currentUser={user}
+          friends={friends}
+          contacts={contacts}
+          groups={groups}
+          onContactCreated={handleContactCreated}
           onClose={() => { setShowAddExpense(false); setEditingExpense(undefined); }}
           onCreate={handleCreateOrUpdateExpense}
-          onAddMember={handleAddMember}
-        />
-      )}
-
-      {showCreateGroup && (
-        <CreateGroupModal
-          onClose={() => setShowCreateGroup(false)}
-          onCreate={handleCreateGroup}
         />
       )}
     </main>

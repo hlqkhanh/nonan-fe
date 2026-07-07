@@ -1,18 +1,26 @@
-import { Camera, Check, ChevronLeft, ImagePlus, ReceiptText, Users, X } from "lucide-react";
+import { BookUser, Camera, ChevronLeft, ImagePlus, ReceiptText, UserPlus, Users, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { createContact } from "../../data/api";
+import { resolveAvatarUrl } from "../../lib/avatar";
 import { formatVnd, formatVndInput, parseVndInput } from "../../lib/money/format";
 import { calculateCustomSplit } from "../../lib/split/customSplit";
+import type { SplitParticipant } from "../../lib/split/customSplit";
 import { calculateEqualSplit } from "../../lib/split/equalSplit";
-import type { Expense, Group, Member, PayerContribution, SplitMode } from "../../types/sharebill";
+import type { Contact, Expense, Friend, Group, Participant, PayerContribution, SplitMode, User } from "../../types/sharebill";
+
+type DrawerTarget = "payer" | "participant" | null;
 
 type AddExpenseModalProps = {
-  group: Group;
   initialExpense?: Expense;
   mode?: "create" | "edit";
   titleBadges?: string[];
+  currentUser: User;
+  friends: Friend[];
+  contacts: Contact[];
+  groups: Group[];
+  onContactCreated: (contact: Contact) => void;
   onClose: () => void;
   onCreate: (expense: Expense) => void;
-  onAddMember: (member: Member) => Promise<Member>;
 };
 
 function todayIso(): string {
@@ -28,21 +36,17 @@ function readImageAsDataUrl(file: File): Promise<string> {
   });
 }
 
-function createTempMember(name: string): Member {
-  return {
-    id: `temp:${encodeURIComponent(name)}:${Date.now()}`,
-    name
-  };
-}
-
 export function AddExpenseModal({
-  group,
   initialExpense,
   mode = "create",
   titleBadges = [],
+  currentUser,
+  friends,
+  contacts,
+  groups,
+  onContactCreated,
   onClose,
-  onCreate,
-  onAddMember
+  onCreate
 }: AddExpenseModalProps) {
   const [step, setStep] = useState(1);
   const [imageUrl, setImageUrl] = useState<string | undefined>(initialExpense?.imageUrl);
@@ -55,10 +59,11 @@ export function AddExpenseModal({
     for (const p of initialExpense.payers) map[p.memberId] = p.amount;
     return map;
   });
-  const [selectedPayerIds, setSelectedPayerIds] = useState<string[]>(initialExpense?.payers.map(p => p.memberId) ?? []);
-  const [availableMembers, setAvailableMembers] = useState<Member[]>(group.members);
+  const [selectedPayerIds, setSelectedPayerIds] = useState<string[]>(initialExpense?.payers.map((p) => p.memberId) ?? []);
   const [participantIds, setParticipantIds] = useState<string[]>(
-    initialExpense ? initialExpense.participants.map(p => p.memberId) : group.members.map(m => m.id)
+    initialExpense
+      ? initialExpense.participants.map((p) => p.memberId)
+      : [`user:${currentUser.id}`]
   );
   const [splitMode, setSplitMode] = useState<SplitMode>(initialExpense?.splitMode ?? "equal");
   const [customAmounts, setCustomAmounts] = useState<Record<string, number | undefined>>(() => {
@@ -69,10 +74,104 @@ export function AddExpenseModal({
     }
     return map;
   });
-  const [tempMemberName, setTempMemberName] = useState("");
+  const [localContacts, setLocalContacts] = useState<Contact[]>(contacts);
+  const [drawerTarget, setDrawerTarget] = useState<DrawerTarget>(null);
+  const [drawerSelected, setDrawerSelected] = useState<string[]>([]);
+  const [instantNamePayer, setInstantNamePayer] = useState("");
+  const [instantNameParticipant, setInstantNameParticipant] = useState("");
+  const [creatingContact, setCreatingContact] = useState(false);
   const [error, setError] = useState("");
 
-  const participants = availableMembers.filter((member) => participantIds.includes(member.id));
+  useEffect(() => {
+    setLocalContacts(contacts);
+  }, [contacts]);
+
+  const selfParticipant = useMemo<Participant>(
+    () => ({
+      participantId: `user:${currentUser.id}`,
+      name: currentUser.displayName,
+      avatarUrl: currentUser.avatarUrl,
+      type: "user"
+    }),
+    [currentUser]
+  );
+
+  const directory = useMemo<Participant[]>(() => {
+    const map = new Map<string, Participant>();
+    map.set(selfParticipant.participantId, selfParticipant);
+    for (const friend of friends) {
+      map.set(`user:${friend.userId}`, {
+        participantId: `user:${friend.userId}`,
+        name: friend.displayName,
+        avatarUrl: friend.avatarUrl,
+        type: "user"
+      });
+    }
+    for (const contact of localContacts) {
+      map.set(`contact:${contact.id}`, {
+        participantId: `contact:${contact.id}`,
+        name: contact.name,
+        avatarUrl: contact.avatarUrl,
+        type: "contact"
+      });
+    }
+    for (const group of groups) {
+      for (const member of group.members) {
+        if (!map.has(member.participantId)) map.set(member.participantId, member);
+      }
+    }
+    if (initialExpense) {
+      for (const payer of initialExpense.payers) {
+        if (!map.has(payer.memberId)) {
+          map.set(payer.memberId, {
+            participantId: payer.memberId,
+            name: payer.name ?? payer.memberId,
+            avatarUrl: payer.avatarUrl,
+            type: payer.memberId.startsWith("contact:") ? "contact" : "user"
+          });
+        }
+      }
+      for (const participant of initialExpense.participants) {
+        if (!map.has(participant.memberId)) {
+          map.set(participant.memberId, {
+            participantId: participant.memberId,
+            name: participant.memberName ?? participant.memberId,
+            avatarUrl: participant.avatarUrl,
+            type: participant.memberId.startsWith("contact:") ? "contact" : "user"
+          });
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [selfParticipant, friends, localContacts, groups, initialExpense]);
+
+  function findParticipant(id: string): Participant | undefined {
+    return directory.find((p) => p.participantId === id);
+  }
+
+  const favoriteParticipants = useMemo<Participant[]>(() => {
+    const favFriends = friends
+      .filter((f) => f.isFavorite)
+      .map<Participant>((f) => ({ participantId: `user:${f.userId}`, name: f.displayName, avatarUrl: f.avatarUrl, type: "user" }));
+    const favContacts = localContacts
+      .filter((c) => c.isFavorite)
+      .map<Participant>((c) => ({ participantId: `contact:${c.id}`, name: c.name, avatarUrl: c.avatarUrl, type: "contact" }));
+    return [selfParticipant, ...favFriends, ...favContacts];
+  }, [friends, localContacts, selfParticipant]);
+
+  function quickRow(selectedIds: string[]): Participant[] {
+    const map = new Map<string, Participant>();
+    for (const p of favoriteParticipants) map.set(p.participantId, p);
+    for (const id of selectedIds) {
+      const p = findParticipant(id);
+      if (p) map.set(p.participantId, p);
+    }
+    return Array.from(map.values());
+  }
+
+  const participants = participantIds.map((id) => findParticipant(id)).filter((p): p is Participant => Boolean(p));
+  const splitParticipants: SplitParticipant[] = participants.map((p) => ({ id: p.participantId, name: p.name }));
+
   const payers = useMemo<PayerContribution[]>(
     () =>
       Object.entries(payerAmounts)
@@ -82,36 +181,25 @@ export function AddExpenseModal({
   );
   const payerTotal = payers.reduce((sum, payer) => sum + payer.amount, 0);
 
-  useEffect(() => {
-    // If we are editing and have temp members in participants not in group, we should add them to availableMembers
-    const groupMemberIds = new Set(group.members.map(m => m.id));
-    const extraMembers: Member[] = [];
-    if (initialExpense) {
-      for (const p of initialExpense.participants) {
-        if (!groupMemberIds.has(p.memberId) && p.memberName && p.memberId.startsWith("temp:")) {
-           extraMembers.push({ id: p.memberId, name: p.memberName });
-           groupMemberIds.add(p.memberId);
-        }
-      }
-    }
-    setAvailableMembers([...group.members, ...extraMembers]);
-  }, [group.members, initialExpense]);
-
   const previewShares = useMemo(() => {
-    if (participants.length === 0) return [];
+    if (splitParticipants.length === 0) return [];
     try {
       return splitMode === "equal"
-        ? calculateEqualSplit(totalAmount, participants)
-        : calculateCustomSplit({ totalAmount, participants, customAmounts });
+        ? calculateEqualSplit(totalAmount, splitParticipants)
+        : calculateCustomSplit({ totalAmount, participants: splitParticipants, customAmounts });
     } catch {
       return [];
     }
-  }, [customAmounts, participants, splitMode, totalAmount]);
+  }, [customAmounts, splitParticipants, splitMode, totalAmount]);
 
   function toggleParticipant(memberId: string) {
     setParticipantIds((current) =>
       current.includes(memberId) ? current.filter((id) => id !== memberId) : [...current, memberId]
     );
+  }
+
+  function addToParticipantSelection(ids: string[]) {
+    setParticipantIds((current) => Array.from(new Set([...current, ...ids])));
   }
 
   function togglePayer(memberId: string) {
@@ -152,15 +240,66 @@ export function AddExpenseModal({
     });
   }
 
-  async function addTempMember() {
-    const name = tempMemberName.trim();
-    if (!name) return;
+  function addToPayerSelection(ids: string[]) {
+    if (totalAmount <= 0) {
+      setError("Nhập tổng tiền trước khi chọn người trả.");
+      return;
+    }
+    setError("");
+    setSelectedPayerIds((current) => {
+      const merged = Array.from(new Set([...current, ...ids]));
+      setPayerAmounts((prev) => {
+        const copy = { ...prev };
+        if (merged.length === 1) {
+          copy[merged[0]] = totalAmount;
+        } else {
+          for (const id of merged) {
+            if (!(id in copy)) copy[id] = 0;
+          }
+        }
+        return copy;
+      });
+      return merged;
+    });
+  }
 
-    const member = createTempMember(name);
-    await onAddMember(member);
-    setAvailableMembers((current) => [...current, member]);
-    setParticipantIds((current) => [...current, member.id]);
-    setTempMemberName("");
+  async function handleInstantContact(name: string, target: "payer" | "participant") {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setCreatingContact(true);
+    setError("");
+    try {
+      const contact = await createContact(trimmed);
+      onContactCreated(contact);
+      setLocalContacts((current) => [...current, contact]);
+      const participantId = `contact:${contact.id}`;
+      if (target === "payer") {
+        addToPayerSelection([participantId]);
+        setInstantNamePayer("");
+      } else {
+        addToParticipantSelection([participantId]);
+        setInstantNameParticipant("");
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Không thể thêm thành viên tạm thời.");
+    } finally {
+      setCreatingContact(false);
+    }
+  }
+
+  function openDrawer(target: "payer" | "participant") {
+    setDrawerTarget(target);
+    setDrawerSelected([]);
+  }
+
+  function toggleDrawerSelected(id: string) {
+    setDrawerSelected((current) => (current.includes(id) ? current.filter((x) => x !== id) : [...current, id]));
+  }
+
+  function applyDrawer() {
+    if (drawerTarget === "payer") addToPayerSelection(drawerSelected);
+    if (drawerTarget === "participant") addToParticipantSelection(drawerSelected);
+    setDrawerTarget(null);
   }
 
   async function handleImageChange(file?: File) {
@@ -188,29 +327,24 @@ export function AddExpenseModal({
 
   function submit() {
     try {
-      if (participants.length === 0) {
+      if (splitParticipants.length === 0) {
         setError("Cần chọn ít nhất một người tham gia.");
         return;
       }
 
       const shares =
         splitMode === "equal"
-          ? calculateEqualSplit(totalAmount, participants)
-          : calculateCustomSplit({ totalAmount, participants, customAmounts });
-      const sharesWithNames = shares.map((share) => ({
-        ...share,
-        memberName: availableMembers.find((member) => member.id === share.memberId)?.name
-      }));
+          ? calculateEqualSplit(totalAmount, splitParticipants)
+          : calculateCustomSplit({ totalAmount, participants: splitParticipants, customAmounts });
 
       onCreate({
         id: initialExpense?.id || crypto.randomUUID(),
-        groupId: group.id,
         title: title.trim(),
         totalAmount,
         paidDate,
         imageUrl,
         payers,
-        participants: sharesWithNames,
+        participants: shares.map((share) => ({ memberId: share.memberId, amount: share.amount, isCustom: share.isCustom })),
         splitMode,
         ledgerCycleId: initialExpense?.ledgerCycleId
       });
@@ -218,6 +352,10 @@ export function AddExpenseModal({
       setError(caught instanceof Error ? caught.message : "Không thể tạo bill.");
     }
   }
+
+  const payerQuickRow = quickRow(selectedPayerIds);
+  const participantQuickRow = quickRow(participantIds);
+  const allQuickSelected = participantQuickRow.length > 0 && participantQuickRow.every((p) => participantIds.includes(p.participantId));
 
   return (
     <div className="fixed inset-0 z-20 grid place-items-end bg-black/76 sm:place-items-center">
@@ -239,7 +377,7 @@ export function AddExpenseModal({
               <h2 className="text-lg font-semibold text-mist">{mode === "create" ? "Tạo Bill Mới" : "Sửa Bill"}</h2>
             </div>
           </div>
-          <button className="grid h-10 w-10 place-items-center rounded-full bg-white/[0.06] transition-colors hover:bg-white/10" type="button" onClick={onClose}>
+          <button className="grid h-10 w-10 place-items-center rounded-full bg-white/[0.06] transition-colors hover:bg-white/10" type="button" title="Đóng" onClick={onClose}>
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -280,7 +418,7 @@ export function AddExpenseModal({
                 />
                 <div className="mt-2 flex flex-wrap gap-2">
                   {titleBadges.map((badge) => (
-                     <button
+                    <button
                       key={badge}
                       className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5 text-xs font-semibold text-mist"
                       type="button"
@@ -318,45 +456,94 @@ export function AddExpenseModal({
                     {formatVnd(payerTotal)} / {formatVnd(totalAmount)}
                   </span>
                 </div>
-                <div className="mb-4 flex gap-4 overflow-x-auto no-scrollbar pb-2 pt-1">
-                  {group.members.map((member) => {
-                    const isSelected = selectedPayerIds.includes(member.id);
+                <div className="mb-3 flex gap-4 overflow-x-auto no-scrollbar pb-2 pt-1">
+                  {payerQuickRow.map((participant) => {
+                    const isSelected = selectedPayerIds.includes(participant.participantId);
                     return (
                       <button
-                        key={member.id}
+                        key={participant.participantId}
                         className="flex shrink-0 flex-col items-center gap-1.5"
                         type="button"
-                        onClick={() => togglePayer(member.id)}
+                        onClick={() => togglePayer(participant.participantId)}
                       >
                         <div className={`rounded-full p-[2px] ${isSelected ? "border-[2px] border-coral" : "border-[2px] border-transparent"}`}>
                           <div className="relative h-[52px] w-[52px] overflow-hidden rounded-full border-[3px] border-white/10 bg-white/5">
-                            <img src={`https://api.dicebear.com/7.x/notionists/svg?seed=${member.name}`} alt={member.name} className="h-full w-full object-cover opacity-90" />
+                            <img src={resolveAvatarUrl(participant.name, participant.avatarUrl)} alt={participant.name} className="h-full w-full object-cover opacity-90" />
                           </div>
                         </div>
                         <span className={`text-xs font-bold ${isSelected ? "text-coral" : "text-white/60"}`}>
-                          {member.name.split(" ")[0]}
+                          {participant.name.split(" ")[0]}
                         </span>
                       </button>
                     );
                   })}
                 </div>
 
+                {groups.length > 0 && (
+                  <div className="mb-3 flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                    {groups.map((group) => (
+                      <button
+                        key={group.id}
+                        type="button"
+                        className="shrink-0 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5 text-xs font-semibold text-mist"
+                        onClick={() => addToPayerSelection(group.members.map((m) => m.participantId))}
+                      >
+                        {group.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div className="mb-3 flex gap-2">
+                  <button
+                    className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-[8px] border border-white/10 bg-white/[0.05] text-xs font-semibold text-mist"
+                    type="button"
+                    onClick={() => openDrawer("payer")}
+                  >
+                    <BookUser className="h-3.5 w-3.5" />
+                    Danh bạ
+                  </button>
+                </div>
+                <div className="mb-4 flex gap-2">
+                  <input
+                    className="h-10 min-w-0 flex-1 rounded-[8px] border border-white/10 bg-white/[0.06] px-3 text-xs text-mist outline-none focus:border-coral"
+                    value={instantNamePayer}
+                    onChange={(event) => setInstantNamePayer(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void handleInstantContact(instantNamePayer, "payer");
+                      }
+                    }}
+                    placeholder="Thêm thành viên tạm thời"
+                  />
+                  <button
+                    className="flex h-10 shrink-0 items-center gap-1 rounded-[8px] bg-mist px-3 text-xs font-semibold text-ink disabled:opacity-50"
+                    type="button"
+                    disabled={creatingContact}
+                    onClick={() => handleInstantContact(instantNamePayer, "payer")}
+                  >
+                    <UserPlus className="h-3.5 w-3.5" />
+                    Thêm
+                  </button>
+                </div>
+
                 {selectedPayerIds.length > 1 && (
                   <div className="space-y-2 border-t border-white/10 pt-4">
                     {selectedPayerIds.map((memberId) => {
-                      const member = availableMembers.find(m => m.id === memberId);
-                      if (!member) return null;
+                      const participant = findParticipant(memberId);
+                      if (!participant) return null;
                       return (
-                        <div key={member.id} className="flex items-center gap-3 rounded-[8px] border border-white/10 bg-white/[0.04] p-2">
+                        <div key={memberId} className="flex items-center gap-3 rounded-[8px] border border-white/10 bg-white/[0.04] p-2">
                           <span className="w-24 truncate px-2 text-sm font-semibold text-mist">
-                            {member.name}
+                            {participant.name}
                           </span>
                           <input
                             className="h-10 min-w-0 flex-1 rounded-[8px] border border-white/10 bg-ink px-3 text-right text-mist outline-none focus:border-coral"
                             inputMode="numeric"
-                            value={formatVndInput(payerAmounts[member.id] ?? 0)}
+                            value={formatVndInput(payerAmounts[memberId] ?? 0)}
                             onChange={(event) =>
-                              setPayerAmounts((current) => ({ ...current, [member.id]: parseVndInput(event.target.value) }))
+                              setPayerAmounts((current) => ({ ...current, [memberId]: parseVndInput(event.target.value) }))
                             }
                             placeholder="0"
                           />
@@ -383,98 +570,129 @@ export function AddExpenseModal({
                 <div className="mb-2">
                   <span className="text-sm text-white/55">Thành viên tham gia</span>
                 </div>
-                <div className="mb-4 flex gap-4 overflow-x-auto no-scrollbar pb-2 pt-1">
+                <div className="mb-3 flex gap-4 overflow-x-auto no-scrollbar pb-2 pt-1">
                   <button
                     className="flex shrink-0 flex-col items-center gap-1.5"
                     type="button"
-                    onClick={() =>
-                      setParticipantIds(
-                        participantIds.length === availableMembers.length ? [] : availableMembers.map((member) => member.id)
-                      )
-                    }
+                    onClick={() => {
+                      if (allQuickSelected) {
+                        setParticipantIds((current) => current.filter((id) => !participantQuickRow.some((p) => p.participantId === id)));
+                      } else {
+                        addToParticipantSelection(participantQuickRow.map((p) => p.participantId));
+                      }
+                    }}
                   >
-                    <div className={`rounded-full p-[2px] ${participantIds.length === availableMembers.length ? "border-[2px] border-coral" : "border-[2px] border-transparent"}`}>
+                    <div className={`rounded-full p-[2px] ${allQuickSelected ? "border-[2px] border-coral" : "border-[2px] border-transparent"}`}>
                       <div className="grid h-[52px] w-[52px] place-items-center rounded-full bg-white/20">
                         <Users className="h-6 w-6 text-white" />
                       </div>
                     </div>
-                    <span className={`text-xs font-bold ${participantIds.length === availableMembers.length ? "text-coral" : "text-white/60"}`}>
-                      Tất cả
-                    </span>
+                    <span className={`text-xs font-bold ${allQuickSelected ? "text-coral" : "text-white/60"}`}>Tất cả</span>
                   </button>
 
-                  {availableMembers.map((member) => {
-                    const isSelected = participantIds.includes(member.id);
-                    const showCoralBorder = isSelected && participantIds.length !== availableMembers.length;
+                  {participantQuickRow.map((participant) => {
+                    const isSelected = participantIds.includes(participant.participantId);
                     return (
                       <button
-                        key={member.id}
+                        key={participant.participantId}
                         className="flex shrink-0 flex-col items-center gap-1.5"
                         type="button"
-                        onClick={() => toggleParticipant(member.id)}
+                        onClick={() => toggleParticipant(participant.participantId)}
                       >
-                        <div className={`rounded-full p-[2px] ${showCoralBorder ? "border-[2px] border-coral" : "border-[2px] border-transparent"}`}>
+                        <div className={`rounded-full p-[2px] ${isSelected ? "border-[2px] border-coral" : "border-[2px] border-transparent"}`}>
                           <div className="relative h-[52px] w-[52px] overflow-hidden rounded-full border-[3px] border-white/10 bg-white/5">
-                            <img src={`https://api.dicebear.com/7.x/notionists/svg?seed=${member.name}`} alt={member.name} className="h-full w-full object-cover opacity-90" />
-                            {member.id.startsWith("temp:") && (
-                              <div className="absolute inset-x-0 bottom-0 bg-black/60 pb-0.5 text-center text-[8px] font-bold text-coral">tạm</div>
+                            <img src={resolveAvatarUrl(participant.name, participant.avatarUrl)} alt={participant.name} className="h-full w-full object-cover opacity-90" />
+                            {participant.type === "contact" && (
+                              <div className="absolute inset-x-0 bottom-0 bg-black/60 pb-0.5 text-center text-[8px] font-bold text-coral">danh bạ</div>
                             )}
                           </div>
                         </div>
-                        <span className={`text-xs font-bold ${showCoralBorder ? "text-coral" : "text-white/60"}`}>
-                          {member.name.split(" ")[0]}
+                        <span className={`text-xs font-bold ${isSelected ? "text-coral" : "text-white/60"}`}>
+                          {participant.name.split(" ")[0]}
                         </span>
                       </button>
                     );
                   })}
                 </div>
+
+                {groups.length > 0 && (
+                  <div className="mb-3 flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                    {groups.map((group) => (
+                      <button
+                        key={group.id}
+                        type="button"
+                        className="shrink-0 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5 text-xs font-semibold text-mist"
+                        onClick={() => addToParticipantSelection(group.members.map((m) => m.participantId))}
+                      >
+                        {group.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div className="mb-3 flex gap-2">
+                  <button
+                    className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-[8px] border border-white/10 bg-white/[0.05] text-xs font-semibold text-mist"
+                    type="button"
+                    onClick={() => openDrawer("participant")}
+                  >
+                    <BookUser className="h-3.5 w-3.5" />
+                    Danh bạ
+                  </button>
+                </div>
                 <div className="mb-3 flex gap-2">
                   <input
                     className="h-11 min-w-0 flex-1 rounded-[8px] border border-white/10 bg-white/[0.06] px-3 text-sm text-mist outline-none focus:border-coral"
-                    value={tempMemberName}
-                    onChange={(event) => setTempMemberName(event.target.value)}
+                    value={instantNameParticipant}
+                    onChange={(event) => setInstantNameParticipant(event.target.value)}
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
                         event.preventDefault();
-                        addTempMember();
+                        void handleInstantContact(instantNameParticipant, "participant");
                       }
                     }}
-                    placeholder="Thêm user tạm thời"
+                    placeholder="Thêm thành viên tạm thời"
                   />
-                  <button className="h-11 rounded-[8px] bg-mist px-4 text-sm font-semibold text-ink" type="button" onClick={addTempMember}>
+                  <button
+                    className="flex h-11 shrink-0 items-center gap-1 rounded-[8px] bg-mist px-4 text-sm font-semibold text-ink disabled:opacity-50"
+                    type="button"
+                    disabled={creatingContact}
+                    onClick={() => handleInstantContact(instantNameParticipant, "participant")}
+                  >
+                    <UserPlus className="h-4 w-4" />
                     Thêm
                   </button>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2 rounded-[10px] bg-white/[0.05] p-1">
-                {(["equal", "custom"] as SplitMode[]).map((mode) => (
+                {(["equal", "custom"] as SplitMode[]).map((splitOption) => (
                   <button
-                    key={mode}
+                    key={splitOption}
                     className={`h-10 rounded-[8px] text-sm font-semibold ${
-                      splitMode === mode ? "bg-mist text-ink" : "text-white/56"
+                      splitMode === splitOption ? "bg-mist text-ink" : "text-white/56"
                     }`}
                     type="button"
-                    onClick={() => setSplitMode(mode)}
+                    onClick={() => setSplitMode(splitOption)}
                   >
-                    {mode === "equal" ? "Chia đều" : "Tùy chỉnh"}
+                    {splitOption === "equal" ? "Chia đều" : "Tùy chỉnh"}
                   </button>
                 ))}
               </div>
 
               {splitMode === "custom" && (
                 <div className="space-y-2">
-                  {participants.map((member) => (
-                    <label key={member.id} className="flex items-center gap-3 rounded-[8px] border border-white/10 bg-white/[0.04] p-2">
-                      <span className="w-24 truncate text-sm">{member.name}</span>
+                  {participants.map((participant) => (
+                    <label key={participant.participantId} className="flex items-center gap-3 rounded-[8px] border border-white/10 bg-white/[0.04] p-2">
+                      <span className="w-24 truncate text-sm">{participant.name}</span>
                       <input
                         className="h-10 min-w-0 flex-1 rounded-[8px] border border-white/10 bg-ink px-3 text-right text-mist outline-none"
                         inputMode="numeric"
-                        value={formatVndInput(customAmounts[member.id] ?? 0)}
+                        value={formatVndInput(customAmounts[participant.participantId] ?? 0)}
                         onChange={(event) =>
                           setCustomAmounts((current) => ({
                             ...current,
-                            [member.id]: event.target.value ? parseVndInput(event.target.value) : undefined
+                            [participant.participantId]: event.target.value ? parseVndInput(event.target.value) : undefined
                           }))
                         }
                         placeholder="Tự động"
@@ -492,7 +710,7 @@ export function AddExpenseModal({
                 <div className="space-y-1">
                   {previewShares.map((share) => (
                     <div key={share.memberId} className="flex justify-between text-sm text-white/64">
-                      <span>{availableMembers.find((member) => member.id === share.memberId)?.name}</span>
+                      <span>{findParticipant(share.memberId)?.name ?? share.memberId}</span>
                       <span>
                         {formatVnd(share.amount)} {share.isCustom ? "(custom)" : ""}
                       </span>
@@ -509,6 +727,43 @@ export function AddExpenseModal({
           )}
         </div>
       </div>
+
+      {drawerTarget && (
+        <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/76 sm:items-center">
+          <div className="flex max-h-[80vh] w-full max-w-[440px] flex-col overflow-hidden rounded-t-[18px] border border-white/10 bg-ink shadow-2xl sm:rounded-[18px]">
+            <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-3">
+              <h3 className="text-lg font-semibold text-mist">Chọn từ danh bạ</h3>
+              <button className="grid h-10 w-10 place-items-center rounded-full bg-white/[0.06]" type="button" title="Đóng" onClick={() => setDrawerTarget(null)}>
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex-1 space-y-2 overflow-y-auto p-4">
+              {directory.map((participant) => (
+                <label
+                  key={participant.participantId}
+                  className="flex items-center gap-3 rounded-[8px] border border-white/10 bg-white/[0.04] p-2.5"
+                >
+                  <input
+                    className="h-4 w-4 shrink-0"
+                    type="checkbox"
+                    checked={drawerSelected.includes(participant.participantId)}
+                    onChange={() => toggleDrawerSelected(participant.participantId)}
+                  />
+                  <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full border border-white/10 bg-white/5">
+                    <img src={resolveAvatarUrl(participant.name, participant.avatarUrl)} alt={participant.name} className="h-full w-full object-cover" />
+                  </div>
+                  <span className="min-w-0 flex-1 truncate text-sm text-mist">{participant.name}</span>
+                </label>
+              ))}
+            </div>
+            <div className="shrink-0 border-t border-white/10 p-4">
+              <button className="h-12 w-full rounded-full bg-coral text-sm font-semibold text-white" type="button" onClick={applyDrawer}>
+                Xong
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,7 +1,6 @@
 import type {
   Expense,
   Group,
-  Member,
   Settlement,
   LedgerCycle,
   LedgerCycleDetail,
@@ -11,7 +10,8 @@ import type {
   FriendRequests,
   FriendSearchResult,
   Contact,
-  FavoriteTargetType
+  FavoriteTargetType,
+  ParticipantType
 } from "../types/sharebill";
 
 const TOKEN_KEY = "sharebill.token";
@@ -22,11 +22,16 @@ export function getToken(): string | null {
 
 export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
+  unauthorizedFired = false; // reset on new login
 }
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
+
+// Prevent multiple concurrent 401s from each dispatching the unauthorized event
+// and clearing the token redundantly (race condition when parallel requests 401).
+let unauthorizedFired = false;
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const token = getToken();
@@ -39,8 +44,11 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   });
 
   if (response.status === 401) {
-    clearToken();
-    window.dispatchEvent(new Event("sharebill:unauthorized"));
+    if (!unauthorizedFired) {
+      unauthorizedFired = true;
+      clearToken();
+      window.dispatchEvent(new Event("sharebill:unauthorized"));
+    }
     throw new Error("Unauthorized");
   }
 
@@ -150,101 +158,102 @@ export async function saveBillTemplates(labels: string[]): Promise<BillTitleTemp
 
 // ----------------- Groups -----------------
 
+export type GroupMemberSelection = { targetType: ParticipantType; targetId: string };
+
 export async function getGroups(): Promise<Group[]> {
   return fetchJson<Group[]>("/api/groups");
 }
 
-export async function createGroup(name: string): Promise<Group> {
+export async function createGroup(name: string, members: GroupMemberSelection[] = []): Promise<Group> {
   return fetchJson<Group>("/api/groups", {
     method: "POST",
+    body: JSON.stringify({ name, members })
+  });
+}
+
+export async function renameGroup(groupId: string, name: string): Promise<Group> {
+  return fetchJson<Group>(`/api/groups/${groupId}`, {
+    method: "PATCH",
     body: JSON.stringify({ name })
   });
 }
 
-export async function addGroupMember(groupId: string, member: Member): Promise<Group> {
+export async function addGroupMember(groupId: string, targetType: ParticipantType, targetId: string): Promise<Group> {
   return fetchJson<Group>(`/api/groups/${groupId}/members`, {
     method: "POST",
-    body: JSON.stringify({ id: member.id, name: member.name })
+    body: JSON.stringify({ targetType, targetId })
   });
 }
 
-// ----------------- Ledger -----------------
-
-export async function getCurrentLedgerCycle(groupId: string): Promise<LedgerCycleDetail> {
-  return fetchJson<LedgerCycleDetail>(`/api/groups/${groupId}/ledger/current`);
+export async function removeGroupMember(groupId: string, targetType: ParticipantType, targetId: string): Promise<Group> {
+  return fetchJson<Group>(`/api/groups/${groupId}/members/${targetType}/${targetId}`, { method: "DELETE" });
 }
 
-export async function getLedgerCycles(groupId: string): Promise<LedgerCycle[]> {
-  return fetchJson<LedgerCycle[]>(`/api/groups/${groupId}/ledger/cycles`);
+export async function deleteGroup(groupId: string): Promise<void> {
+  await fetchJson<void>(`/api/groups/${groupId}`, { method: "DELETE" });
 }
 
-export async function getLedgerCycleDetail(groupId: string, cycleId: string): Promise<LedgerCycleDetail> {
-  return fetchJson<LedgerCycleDetail>(`/api/groups/${groupId}/ledger/cycles/${cycleId}`);
+// ----------------- Ledger (personal, per-user) -----------------
+
+export async function getCurrentLedgerCycle(): Promise<LedgerCycleDetail> {
+  return fetchJson<LedgerCycleDetail>("/api/ledger/current");
 }
 
-export async function settleCurrentLedgerCycle(groupId: string, _actorMemberId: string): Promise<LedgerCycleDetail> {
-  return fetchJson<LedgerCycleDetail>(`/api/groups/${groupId}/ledger/current/settle`, { method: "POST" });
+export async function getLedgerCycles(): Promise<LedgerCycle[]> {
+  return fetchJson<LedgerCycle[]>("/api/ledger/cycles");
 }
 
-export async function archiveCurrentLedgerCycle(groupId: string, _actorMemberId: string): Promise<LedgerCycleDetail> {
-  return fetchJson<LedgerCycleDetail>(`/api/groups/${groupId}/ledger/current/archive`, { method: "POST" });
+export async function getLedgerCycleDetail(cycleId: string): Promise<LedgerCycleDetail> {
+  return fetchJson<LedgerCycleDetail>(`/api/ledger/cycles/${cycleId}`);
 }
 
-// ----------------- Expenses -----------------
-
-export async function getExpenses(groupId: string): Promise<Expense[]> {
-  return fetchJson<Expense[]>(`/api/groups/${groupId}/expenses`);
+export async function settleCurrentLedgerCycle(): Promise<LedgerCycleDetail> {
+  return fetchJson<LedgerCycleDetail>("/api/ledger/current/settle", { method: "POST" });
 }
 
-export async function createExpense(groupId: string, expense: Expense, _actorMemberId: string): Promise<Expense> {
-  return fetchJson<Expense>(`/api/groups/${groupId}/expenses`, {
+export async function archiveCurrentLedgerCycle(): Promise<LedgerCycleDetail> {
+  return fetchJson<LedgerCycleDetail>("/api/ledger/current/archive", { method: "POST" });
+}
+
+// ----------------- Expenses (personal, per-user) -----------------
+
+export async function getExpenses(): Promise<Expense[]> {
+  return fetchJson<Expense[]>("/api/expenses");
+}
+
+export async function createExpense(expense: Expense): Promise<Expense> {
+  return fetchJson<Expense>("/api/expenses", {
     method: "POST",
     body: JSON.stringify(expense)
   });
 }
 
-export async function updateExpense(
-  groupId: string,
-  expenseId: string,
-  expense: Expense,
-  _actorMemberId: string
-): Promise<Expense> {
-  return fetchJson<Expense>(`/api/groups/${groupId}/expenses/${expenseId}`, {
+export async function updateExpense(expenseId: string, expense: Expense): Promise<Expense> {
+  return fetchJson<Expense>(`/api/expenses/${expenseId}`, {
     method: "PUT",
     body: JSON.stringify(expense)
   });
 }
 
-export async function deleteExpense(groupId: string, expenseId: string, _actorMemberId: string): Promise<void> {
-  await fetchJson<void>(`/api/groups/${groupId}/expenses/${expenseId}`, { method: "DELETE" });
+export async function deleteExpense(expenseId: string): Promise<void> {
+  await fetchJson<void>(`/api/expenses/${expenseId}`, { method: "DELETE" });
 }
 
 // ----------------- Settlements -----------------
 
-export async function getSettlements(groupId: string): Promise<Settlement[]> {
-  return fetchJson<Settlement[]>(`/api/groups/${groupId}/settlements`);
+export async function getSettlements(): Promise<Settlement[]> {
+  return fetchJson<Settlement[]>("/api/settlements");
 }
 
-export async function markSettlementPaid(
-  groupId: string,
-  settlementId: string,
-  cycleId: string,
-  _actorMemberId: string
-): Promise<Settlement[]> {
-  return fetchJson<Settlement[]>(`/api/groups/${groupId}/ledger/cycles/${cycleId}/settlements/mark-paid`, {
+export async function markSettlementPaid(cycleId: string, settlementId: string): Promise<Settlement[]> {
+  return fetchJson<Settlement[]>(`/api/ledger/cycles/${cycleId}/settlements/mark-paid`, {
     method: "POST",
     body: JSON.stringify({ settlementId })
   });
 }
 
-export async function adjustSettlement(
-  groupId: string,
-  cycleId: string,
-  settlementId: string,
-  deltaAmount: number,
-  _actorMemberId: string
-): Promise<Settlement[]> {
-  return fetchJson<Settlement[]>(`/api/groups/${groupId}/ledger/cycles/${cycleId}/settlements/adjust`, {
+export async function adjustSettlement(cycleId: string, settlementId: string, deltaAmount: number): Promise<Settlement[]> {
+  return fetchJson<Settlement[]>(`/api/ledger/cycles/${cycleId}/settlements/adjust`, {
     method: "POST",
     body: JSON.stringify({ settlementId, deltaAmount })
   });
