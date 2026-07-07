@@ -71,6 +71,7 @@ export type Group = {
   id: string;
   name: string;
   members: GroupMember[];
+  createdByUserId?: string;
 };
 
 export type PayerContribution = {

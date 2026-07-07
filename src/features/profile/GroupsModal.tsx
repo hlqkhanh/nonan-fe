@@ -1,19 +1,22 @@
-import { Pencil, Plus, Trash2, UserMinus, X } from "lucide-react";
+import { Pencil, Plus, Trash2, UserMinus, UserPlus, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { createGroup, deleteGroup, getGroups, removeGroupMember, renameGroup } from "../../data/api";
+import { addGroupMember, createGroup, deleteGroup, getGroups, removeGroupMember, renameGroup } from "../../data/api";
+import { AddGroupMemberModal } from "../groups/AddGroupMemberModal";
 import { CreateGroupModal, type GroupMemberSelection } from "../groups/CreateGroupModal";
 import { resolveAvatarUrl } from "../../lib/avatar";
-import type { Group } from "../../types/sharebill";
+import type { Group, User } from "../../types/sharebill";
 
 type GroupsModalProps = {
+  currentUser: User;
   onClose: () => void;
 };
 
-export function GroupsModal({ onClose }: GroupsModalProps) {
+export function GroupsModal({ currentUser, onClose }: GroupsModalProps) {
   const [groups, setGroups] = useState<Group[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [renamingGroup, setRenamingGroup] = useState<Group | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [addingMembersGroup, setAddingMembersGroup] = useState<Group | null>(null);
   const [error, setError] = useState("");
 
   async function refresh() {
@@ -72,6 +75,14 @@ export function GroupsModal({ onClose }: GroupsModalProps) {
     }
   }
 
+  async function handleAddMembers(group: Group, members: GroupMemberSelection[]) {
+    for (const member of members) {
+      await addGroupMember(group.id, member.targetType, member.targetId);
+    }
+    setAddingMembersGroup(null);
+    await refresh();
+  }
+
   return (
     <>
       <div className="fixed inset-0 z-30 grid place-items-end bg-black/76 sm:place-items-center">
@@ -104,8 +115,21 @@ export function GroupsModal({ onClose }: GroupsModalProps) {
             {groups.map((group) => (
               <div key={group.id} className="rounded-[8px] border border-white/10 bg-white/[0.04] p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="font-semibold text-mist">{group.name}</span>
+                  <div className="min-w-0">
+                    <span className="font-semibold text-mist">{group.name}</span>
+                    {group.createdByUserId && group.createdByUserId !== currentUser.id && (
+                      <span className="ml-2 text-xs text-white/35">Chia sẻ</span>
+                    )}
+                  </div>
                   <div className="flex gap-2">
+                    <button
+                      className="grid h-8 w-8 place-items-center rounded-full border border-white/10 text-white/50"
+                      type="button"
+                      title="Thêm thành viên"
+                      onClick={() => setAddingMembersGroup(group)}
+                    >
+                      <UserPlus className="h-3.5 w-3.5" />
+                    </button>
                     <button
                       className="grid h-8 w-8 place-items-center rounded-full border border-white/10 text-white/50"
                       type="button"
@@ -114,14 +138,16 @@ export function GroupsModal({ onClose }: GroupsModalProps) {
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
-                    <button
-                      className="grid h-8 w-8 place-items-center rounded-full border border-white/10 text-white/40 hover:text-coral"
-                      type="button"
-                      title="Xóa nhóm"
-                      onClick={() => handleDelete(group)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    {(!group.createdByUserId || group.createdByUserId === currentUser.id) && (
+                      <button
+                        className="grid h-8 w-8 place-items-center rounded-full border border-white/10 text-white/40 hover:text-coral"
+                        type="button"
+                        title="Xóa nhóm"
+                        onClick={() => handleDelete(group)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -157,6 +183,14 @@ export function GroupsModal({ onClose }: GroupsModalProps) {
       </div>
 
       {showCreate && <CreateGroupModal onClose={() => setShowCreate(false)} onCreate={handleCreate} />}
+
+      {addingMembersGroup && (
+        <AddGroupMemberModal
+          group={addingMembersGroup}
+          onClose={() => setAddingMembersGroup(null)}
+          onConfirm={(members) => handleAddMembers(addingMembersGroup, members)}
+        />
+      )}
 
       {renamingGroup && (
         <div className="fixed inset-0 z-40 grid place-items-center bg-black/76 p-4">

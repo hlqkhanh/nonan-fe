@@ -1,4 +1,4 @@
-import { Boxes, ChevronRight, Contact as ContactIcon, KeyRound, LogOut, Pencil, Tags, Users } from "lucide-react";
+import { Boxes, ChevronRight, Contact as ContactIcon, KeyRound, LogOut, Pencil, Tags } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
 import { changePassword, updateProfile } from "../../data/api";
@@ -7,9 +7,8 @@ import type { BillTitleTemplate } from "../../types/sharebill";
 import { AvatarPickerModal } from "./AvatarPickerModal";
 import { BillTemplatesModal } from "./BillTemplatesModal";
 import { ChangePasswordModal } from "./ChangePasswordModal";
-import { ContactsModal } from "./ContactsModal";
+import { DirectoryModal } from "./DirectoryModal";
 import { EditProfileModal } from "./EditProfileModal";
-import { FriendsModal } from "./FriendsModal";
 import { GroupsModal } from "./GroupsModal";
 
 type ProfilePageProps = {
@@ -17,7 +16,7 @@ type ProfilePageProps = {
   onSaveBillTemplates: (labels: string[]) => Promise<void>;
 };
 
-type ProfileModal = "avatar" | "edit" | "password" | "badges" | "friends" | "contacts" | "groups" | null;
+type ProfileModal = "avatar" | "edit" | "password" | "badges" | "directory" | "groups" | null;
 
 export function ProfilePage({ billTemplates, onSaveBillTemplates }: ProfilePageProps) {
   const { user, logout, updateUser } = useAuth();
@@ -94,20 +93,10 @@ export function ProfilePage({ billTemplates, onSaveBillTemplates }: ProfilePageP
         <button
           className="flex w-full items-center gap-3 rounded-[8px] border border-white/10 bg-white/[0.04] p-3 text-left"
           type="button"
-          onClick={() => setOpenModal("friends")}
-        >
-          <Users className="h-4 w-4 text-white/50" />
-          <span className="flex-1 text-sm font-medium text-mist">Bạn bè</span>
-          <ChevronRight className="h-4 w-4 text-white/30" />
-        </button>
-
-        <button
-          className="flex w-full items-center gap-3 rounded-[8px] border border-white/10 bg-white/[0.04] p-3 text-left"
-          type="button"
-          onClick={() => setOpenModal("contacts")}
+          onClick={() => setOpenModal("directory")}
         >
           <ContactIcon className="h-4 w-4 text-white/50" />
-          <span className="flex-1 text-sm font-medium text-mist">Danh bạ tạm</span>
+          <span className="flex-1 text-sm font-medium text-mist">Danh bạ</span>
           <ChevronRight className="h-4 w-4 text-white/30" />
         </button>
 
@@ -139,9 +128,8 @@ export function ProfilePage({ billTemplates, onSaveBillTemplates }: ProfilePageP
       {openModal === "badges" && (
         <BillTemplatesModal templates={billTemplates} onClose={() => setOpenModal(null)} onSave={onSaveBillTemplates} />
       )}
-      {openModal === "friends" && <FriendsModal onClose={() => setOpenModal(null)} />}
-      {openModal === "contacts" && <ContactsModal onClose={() => setOpenModal(null)} />}
-      {openModal === "groups" && <GroupsModal onClose={() => setOpenModal(null)} />}
+      {openModal === "directory" && <DirectoryModal onClose={() => setOpenModal(null)} />}
+      {openModal === "groups" && <GroupsModal currentUser={user} onClose={() => setOpenModal(null)} />}
     </div>
   );
 }
