@@ -69,7 +69,7 @@ export function App() {
     [user, friends, contacts, groups, resolvedMembers]
   );
 
-  function mergeMembers(members: Record<string, LedgerCycleMemberInfo>) {
+  function mergeMembers(members: Record<string, LedgerCycleMemberInfo> = {}) {
     setResolvedMembers((current) => ({ ...current, ...members }));
   }
 

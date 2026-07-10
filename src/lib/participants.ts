@@ -62,7 +62,10 @@ export function buildParticipantMap(
  * fashion (returns a new map). Backend entries win over what's already
  * there, since they're authoritative for the cycle just fetched.
  */
-export function mergeParticipantMembers(map: ParticipantMap, membersFromBackend: Record<string, LedgerCycleMemberInfo>): ParticipantMap {
+export function mergeParticipantMembers(
+  map: ParticipantMap,
+  membersFromBackend: Record<string, LedgerCycleMemberInfo> = {}
+): ParticipantMap {
   const next: ParticipantMap = new Map(map);
   for (const member of Object.values(membersFromBackend)) {
     next.set(member.memberId, { name: member.displayName, avatarUrl: member.avatarUrl });
