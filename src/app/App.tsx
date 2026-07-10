@@ -1,4 +1,4 @@
-import { Home, NotebookTabs, Plus, RefreshCw, User as UserIcon } from "lucide-react";
+import { Home, NotebookTabs, Plus, RefreshCw, User as UserIcon, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   createExpense,
@@ -6,8 +6,9 @@ import {
   getLedgerCycles,
   markSettlementPaid,
   adjustSettlement,
-  settleCurrentLedgerCycle,
-  archiveCurrentLedgerCycle,
+  settleLedgerCycle,
+  archiveLedgerCycle,
+  reopenLedgerCycle,
   updateExpense,
   deleteExpense,
   getBillTemplates,
@@ -18,14 +19,22 @@ import {
 } from "../data/api";
 import { useAuth } from "../auth/AuthContext";
 import { AuthScreen } from "../features/auth/AuthScreen";
-import { ExpenseList } from "../features/expenses/ExpenseList";
 import { AddExpenseModal } from "../features/expenses/AddExpenseModal";
-import { SettlementPanel } from "../features/settlements/SettlementPanel";
+import { CycleWorkspace } from "../features/settlements/CycleWorkspace";
 import { WeeklyCalendar } from "../features/calendar/WeeklyCalendar";
 import { LedgerPage } from "../features/ledger/LedgerPage";
 import { ProfilePage } from "../features/profile/ProfilePage";
 import { buildParticipantMap } from "../lib/participants";
-import type { Contact, Expense, Friend, Group, Settlement, LedgerCycleDetail, LedgerCycle, BillTitleTemplate } from "../types/sharebill";
+import type {
+  Contact,
+  Expense,
+  Friend,
+  Group,
+  LedgerCycleDetail,
+  LedgerCycle,
+  LedgerCycleMemberInfo,
+  BillTitleTemplate
+} from "../types/sharebill";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -40,19 +49,35 @@ export function App() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
 
+  // Grows over time as we fetch cycle details (own + shared-in): every
+  // member id (user/contact) the backend has resolved for us, so shared
+  // bills referencing non-friend `user:<id>` still render real names.
+  const [resolvedMembers, setResolvedMembers] = useState<Record<string, LedgerCycleMemberInfo>>({});
+
   const [selectedDate, setSelectedDate] = useState(todayIso());
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | undefined>(undefined);
+  // Set when "+ Thêm bill" is triggered from a specific Sổ nợ cycle (rather
+  // than the bottom-nav "+", which always targets the home/active cycle).
+  const [addExpenseCycleId, setAddExpenseCycleId] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
   const [activeView, setActiveView] = useState<"home" | "ledger" | "profile">("home");
 
   const currentMemberId = user ? `user:${user.id}` : "";
-  const participantMap = useMemo(() => buildParticipantMap(user, friends, contacts, groups), [user, friends, contacts, groups]);
+  const participantMap = useMemo(
+    () => buildParticipantMap(user, friends, contacts, groups, resolvedMembers),
+    [user, friends, contacts, groups, resolvedMembers]
+  );
+
+  function mergeMembers(members: Record<string, LedgerCycleMemberInfo>) {
+    setResolvedMembers((current) => ({ ...current, ...members }));
+  }
 
   async function refresh() {
     const [detail, cycles] = await Promise.all([getCurrentLedgerCycle(), getLedgerCycles()]);
     setCurrentLedgerDetail(detail);
     setLedgerCycles(cycles);
+    mergeMembers(detail.members);
   }
 
   async function refreshDirectory() {
@@ -76,6 +101,7 @@ export function App() {
         setCurrentLedgerDetail(detail);
         setLedgerCycles(cycles);
         setBillTemplates(templates);
+        mergeMembers(detail.members);
         await refreshDirectory();
       } catch (err) {
         console.error("Boot failed:", err);
@@ -100,7 +126,8 @@ export function App() {
     }
     setShowAddExpense(false);
     setEditingExpense(undefined);
-    setSelectedDate(expense.paidDate);
+    setAddExpenseCycleId(undefined);
+    setSelectedDate(expense.paidDate.slice(0, 10));
     await refresh();
   }
 
@@ -115,16 +142,47 @@ export function App() {
     setContacts((current) => [...current, contact]);
   }
 
-  async function handleMarkPaid(settlementId: string) {
-    if (!currentLedgerDetail) return;
-    await markSettlementPaid(currentLedgerDetail.cycle.id, settlementId);
+  function openCreateExpense(cycleId?: string) {
+    setEditingExpense(undefined);
+    setAddExpenseCycleId(cycleId);
+    setShowAddExpense(true);
+  }
+
+  function openEditExpense(expense: Expense) {
+    setEditingExpense(expense);
+    setAddExpenseCycleId(undefined);
+    setShowAddExpense(true);
+  }
+
+  async function handleMarkPaid(cycleId: string, settlementId: string) {
+    await markSettlementPaid(cycleId, settlementId);
     await refresh();
   }
 
-  async function handleAdjustSettlement(settlementId: string, deltaAmount: number) {
-    if (!currentLedgerDetail) return;
-    await adjustSettlement(currentLedgerDetail.cycle.id, settlementId, deltaAmount);
+  async function handleAdjustSettlement(cycleId: string, settlementId: string, deltaAmount: number) {
+    await adjustSettlement(cycleId, settlementId, deltaAmount);
     await refresh();
+  }
+
+  async function handleSettleLedger(cycleId: string) {
+    if (confirm("Tất toán sổ nợ này và lưu vào lịch sử?")) {
+      await settleLedgerCycle(cycleId);
+      await refresh();
+    }
+  }
+
+  async function handleArchiveLedger(cycleId: string) {
+    if (confirm("Lưu trữ khoản nợ chưa trả?")) {
+      await archiveLedgerCycle(cycleId);
+      await refresh();
+    }
+  }
+
+  async function handleReopenLedger(cycleId: string) {
+    if (confirm("Hủy tất toán và mở lại khoản nợ này?")) {
+      await reopenLedgerCycle(cycleId);
+      await refresh();
+    }
   }
 
   if (status === "loading") {
@@ -148,7 +206,11 @@ export function App() {
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-xs uppercase tracking-[0.18em] text-white/38">ShareBill</p>
-            <p className="truncate text-sm font-semibold text-mist">Sổ nợ của tôi</p>
+            <p className="truncate text-sm font-semibold text-mist">
+              {!currentLedgerDetail || currentLedgerDetail.cycle.isOwner
+                ? "Sổ nợ của tôi"
+                : `Sổ nợ chung với ${currentLedgerDetail.cycle.ownerDisplayName}`}
+            </p>
           </div>
           <button
             className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/10 bg-white/[0.06]"
@@ -167,35 +229,30 @@ export function App() {
         <div className="pb-24">
           {activeView === "home" && (
             <>
+              {!currentLedgerDetail.cycle.isOwner && (
+                <div className="mx-4 mt-3 flex items-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-white/55">
+                  <Users className="h-3.5 w-3.5 shrink-0" />
+                  Khoản nợ chung — chủ sổ là {currentLedgerDetail.cycle.ownerDisplayName}
+                </div>
+              )}
+
               <WeeklyCalendar expenses={currentLedgerDetail.expenses} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
-              <ExpenseList
-                expenses={currentLedgerDetail.expenses}
-                selectedDate={selectedDate}
-                onEditExpense={(e) => { setEditingExpense(e); setShowAddExpense(true); }}
-                onDeleteExpense={handleDeleteExpense}
-              />
-              <SettlementPanel
-                participantMap={participantMap}
-                ledgerCycle={currentLedgerDetail.cycle}
-                expenses={currentLedgerDetail.expenses}
-                auditLogs={currentLedgerDetail.auditLogs}
-                settlements={currentLedgerDetail.settlements as unknown as Settlement[]}
+
+              <CycleWorkspace
+                detail={currentLedgerDetail}
                 currentMemberId={currentMemberId}
-                onMarkPaid={handleMarkPaid}
-                onAdjustSettlement={handleAdjustSettlement}
-                onOpenDetail={() => { /* handled inside SettlementPanel */ }}
-                onSettleLedger={async () => {
-                  if (confirm("Tất toán sổ nợ hiện tại và lưu vào lịch sử?")) {
-                    await settleCurrentLedgerCycle();
-                    await refresh();
-                  }
-                }}
-                onArchiveLedger={async () => {
-                  if (confirm("Lưu trữ khoản nợ chưa trả và bắt đầu sổ nợ mới?")) {
-                    await archiveCurrentLedgerCycle();
-                    await refresh();
-                  }
-                }}
+                participantMap={participantMap}
+                readonly={currentLedgerDetail.cycle.status === "settled"}
+                onMarkPaid={(settlementId) => handleMarkPaid(currentLedgerDetail.cycle.id, settlementId)}
+                onAdjustSettlement={(settlementId, deltaAmount) =>
+                  handleAdjustSettlement(currentLedgerDetail.cycle.id, settlementId, deltaAmount)
+                }
+                onEditExpense={openEditExpense}
+                onDeleteExpense={handleDeleteExpense}
+                onAddExpense={() => openCreateExpense(currentLedgerDetail.cycle.id)}
+                onSettleLedger={() => handleSettleLedger(currentLedgerDetail.cycle.id)}
+                onArchiveLedger={() => handleArchiveLedger(currentLedgerDetail.cycle.id)}
+                onReopenLedger={() => handleReopenLedger(currentLedgerDetail.cycle.id)}
               />
             </>
           )}
@@ -204,8 +261,17 @@ export function App() {
             <LedgerPage
               participantMap={participantMap}
               cycles={ledgerCycles}
-              currentCycleId={currentLedgerDetail.cycle.id}
               currentMemberId={currentMemberId}
+              onCyclesChanged={refresh}
+              onMembersResolved={mergeMembers}
+              onMarkPaid={handleMarkPaid}
+              onAdjustSettlement={handleAdjustSettlement}
+              onEditExpense={openEditExpense}
+              onDeleteExpense={handleDeleteExpense}
+              onAddExpense={openCreateExpense}
+              onSettleLedger={handleSettleLedger}
+              onArchiveLedger={handleArchiveLedger}
+              onReopenLedger={handleReopenLedger}
             />
           )}
 
@@ -229,7 +295,7 @@ export function App() {
               className="grid h-[60px] w-[60px] place-items-center rounded-full border-[6px] border-ink bg-mist text-ink shadow-lg shadow-coral/10 transition-transform active:scale-95 disabled:opacity-50"
               type="button"
               title="Tạo Bill Mới"
-              onClick={() => { setEditingExpense(undefined); setShowAddExpense(true); }}
+              onClick={() => openCreateExpense()}
             >
               <Plus className="h-6 w-6" />
             </button>
@@ -256,6 +322,7 @@ export function App() {
       {showAddExpense && user && (
         <AddExpenseModal
           initialExpense={editingExpense}
+          targetCycleId={addExpenseCycleId}
           mode={editingExpense ? "edit" : "create"}
           titleBadges={billTemplates.map((template) => template.label)}
           currentUser={user}
@@ -263,7 +330,7 @@ export function App() {
           contacts={contacts}
           groups={groups}
           onContactCreated={handleContactCreated}
-          onClose={() => { setShowAddExpense(false); setEditingExpense(undefined); }}
+          onClose={() => { setShowAddExpense(false); setEditingExpense(undefined); setAddExpenseCycleId(undefined); }}
           onCreate={handleCreateOrUpdateExpense}
         />
       )}

@@ -47,7 +47,7 @@ export function WeeklyCalendar({ expenses, selectedDate, onSelectDate }: WeeklyC
     return {
       iso,
       date,
-      bills: expenses.filter((expense) => expense.paidDate === iso)
+      bills: expenses.filter((expense) => expense.paidDate.slice(0, 10) === iso)
     };
   });
 

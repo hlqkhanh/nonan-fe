@@ -1,12 +1,13 @@
-import { BookUser, Camera, ChevronLeft, ImagePlus, ReceiptText, UserPlus, Users, X } from "lucide-react";
+import { BookUser, Camera, ChevronLeft, ImagePlus, Loader2, ReceiptText, RotateCw, UserPlus, Users, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { createContact } from "../../data/api";
+import { createContact, getBillPhotoUploadSignature, uploadImageToCloudinary } from "../../data/api";
 import { resolveAvatarUrl } from "../../lib/avatar";
 import { formatVnd, formatVndInput, parseVndInput } from "../../lib/money/format";
 import { calculateCustomSplit } from "../../lib/split/customSplit";
 import type { SplitParticipant } from "../../lib/split/customSplit";
 import { calculateEqualSplit } from "../../lib/split/equalSplit";
 import type { Contact, Expense, Friend, Group, Participant, PayerContribution, SplitMode, User } from "../../types/sharebill";
+import { CameraCapture } from "./CameraCapture";
 
 type DrawerTarget = "payer" | "participant" | null;
 
@@ -18,13 +19,18 @@ type AddExpenseModalProps = {
   friends: Friend[];
   contacts: Contact[];
   groups: Group[];
+  // When set (from "+ Thêm bill" on a specific Sổ nợ cycle), the created
+  // bill targets this cycle instead of the viewer's home/active cycle.
+  targetCycleId?: string;
   onContactCreated: (contact: Contact) => void;
   onClose: () => void;
-  onCreate: (expense: Expense) => void;
+  onCreate: (expense: Expense) => Promise<void>;
 };
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+function nowLocalIso(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
 }
 
 function readImageAsDataUrl(file: File): Promise<string> {
@@ -44,15 +50,19 @@ export function AddExpenseModal({
   friends,
   contacts,
   groups,
+  targetCycleId,
   onContactCreated,
   onClose,
   onCreate
 }: AddExpenseModalProps) {
   const [step, setStep] = useState(1);
   const [imageUrl, setImageUrl] = useState<string | undefined>(initialExpense?.imageUrl);
+  const [capturedFile, setCapturedFile] = useState<File | null>(null);
+  const [photoUploadState, setPhotoUploadState] = useState<"idle" | "uploading" | "error" | "done">("idle");
+  const [submitting, setSubmitting] = useState(false);
   const [title, setTitle] = useState(initialExpense?.title ?? "");
   const [totalAmount, setTotalAmount] = useState(initialExpense?.totalAmount ?? 0);
-  const [paidDate, setPaidDate] = useState(initialExpense?.paidDate ?? todayIso());
+  const [paidDate, setPaidDate] = useState(initialExpense?.paidDate ? initialExpense.paidDate.slice(0, 16) : nowLocalIso());
   const [payerAmounts, setPayerAmounts] = useState<Record<string, number>>(() => {
     if (!initialExpense) return {};
     const map: Record<string, number> = {};
@@ -308,6 +318,30 @@ export function AddExpenseModal({
     setStep(2);
   }
 
+  // Create-mode camera flow: the captured frame is previewed locally right
+  // away (so step 2 never blocks on the network), while the Cloudinary
+  // upload runs in the background — "Tiếp tục" just waits on its result.
+  function handleCameraCapture(file: File) {
+    setCapturedFile(file);
+    setImageUrl(URL.createObjectURL(file));
+    setStep(2);
+    void uploadCapturedPhoto(file);
+  }
+
+  async function uploadCapturedPhoto(file: File) {
+    setPhotoUploadState("uploading");
+    try {
+      const signature = await getBillPhotoUploadSignature();
+      const url = await uploadImageToCloudinary(file, signature);
+      setImageUrl(url);
+      setPhotoUploadState("done");
+    } catch {
+      // Keep the local preview; bill creation isn't blocked on this, and the
+      // user can retry the upload from the step-2 banner.
+      setPhotoUploadState("error");
+    }
+  }
+
   function validateBasics(): boolean {
     if (!title.trim()) {
       setError("Hãy nhập tên bill.");
@@ -325,19 +359,20 @@ export function AddExpenseModal({
     return true;
   }
 
-  function submit() {
-    try {
-      if (splitParticipants.length === 0) {
-        setError("Cần chọn ít nhất một người tham gia.");
-        return;
-      }
+  async function submit() {
+    if (splitParticipants.length === 0) {
+      setError("Cần chọn ít nhất một người tham gia.");
+      return;
+    }
 
+    setSubmitting(true);
+    try {
       const shares =
         splitMode === "equal"
           ? calculateEqualSplit(totalAmount, splitParticipants)
           : calculateCustomSplit({ totalAmount, participants: splitParticipants, customAmounts });
 
-      onCreate({
+      await onCreate({
         id: initialExpense?.id || crypto.randomUUID(),
         title: title.trim(),
         totalAmount,
@@ -346,10 +381,12 @@ export function AddExpenseModal({
         payers,
         participants: shares.map((share) => ({ memberId: share.memberId, amount: share.amount, isCustom: share.isCustom })),
         splitMode,
-        ledgerCycleId: initialExpense?.ledgerCycleId
+        ledgerCycleId: initialExpense?.ledgerCycleId ?? targetCycleId
       });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Không thể tạo bill.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -383,7 +420,11 @@ export function AddExpenseModal({
         </div>
 
         <div className="p-4">
-          {step === 1 && (
+          {step === 1 && mode === "create" && (
+            <CameraCapture onCapture={handleCameraCapture} onSkip={() => setStep(2)} />
+          )}
+
+          {step === 1 && mode === "edit" && (
             <div className="space-y-4">
               <div className="grid aspect-[4/5] place-items-center rounded-[12px] border border-white/10 bg-panel">
                 {imageUrl ? (
@@ -440,14 +481,34 @@ export function AddExpenseModal({
                 />
               </label>
               <label className="block">
-                <span className="mb-1 block text-sm text-white/55">Ngày thanh toán</span>
+                <span className="mb-1 block text-sm text-white/55">Ngày giờ thanh toán</span>
                 <input
                   className="h-12 w-full rounded-[8px] border border-white/10 bg-white/[0.06] px-3 text-mist outline-none focus:border-coral"
-                  type="date"
+                  type="datetime-local"
                   value={paidDate}
                   onChange={(event) => setPaidDate(event.target.value)}
                 />
               </label>
+
+              {photoUploadState === "uploading" && (
+                <div className="flex items-center gap-2 rounded-[8px] bg-white/[0.04] p-3 text-xs text-white/60">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Đang tải ảnh lên...
+                </div>
+              )}
+              {photoUploadState === "error" && (
+                <div className="flex items-center justify-between gap-2 rounded-[8px] bg-coral/12 p-3 text-xs text-coral">
+                  <span>Tải ảnh lên thất bại — vẫn dùng được ảnh tạm để tạo bill.</span>
+                  <button
+                    type="button"
+                    className="flex shrink-0 items-center gap-1 rounded-[8px] bg-coral/20 px-2 py-1 font-semibold"
+                    onClick={() => capturedFile && void uploadCapturedPhoto(capturedFile)}
+                  >
+                    <RotateCw className="h-3 w-3" />
+                    Thử lại
+                  </button>
+                </div>
+              )}
 
               <div>
                 <div className="mb-2 flex items-center justify-between">
@@ -561,10 +622,12 @@ export function AddExpenseModal({
               </div>
               {error && <p className="rounded-[8px] bg-coral/12 p-3 text-sm text-coral">{error}</p>}
               <button
-                className="h-12 w-full rounded-full bg-mist font-semibold text-ink"
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-mist font-semibold text-ink disabled:opacity-50"
                 type="button"
+                disabled={photoUploadState === "uploading"}
                 onClick={() => validateBasics() && setStep(3)}
               >
+                {photoUploadState === "uploading" && <Loader2 className="h-4 w-4 animate-spin" />}
                 Tiếp tục
               </button>
             </div>
@@ -732,7 +795,13 @@ export function AddExpenseModal({
               </div>
 
               {error && <p className="rounded-[8px] bg-coral/12 p-3 text-sm text-coral">{error}</p>}
-              <button className="h-12 w-full rounded-full bg-coral font-semibold text-white" type="button" onClick={submit}>
+              <button
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-coral font-semibold text-white disabled:opacity-50"
+                type="button"
+                disabled={submitting}
+                onClick={submit}
+              >
+                {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
                 {mode === "create" ? "Tạo bill" : "Lưu bill"}
               </button>
             </div>

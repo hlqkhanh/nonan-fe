@@ -101,6 +101,9 @@ export type Expense = {
   participants: ParticipantShare[];
   splitMode: SplitMode;
   ledgerCycleId?: string;
+  // Display name of whoever created this bill (may differ from the viewer
+  // now that a ledger cycle's bills can be created by any member).
+  createdByDisplayName?: string;
 };
 
 export type Settlement = {
@@ -111,7 +114,7 @@ export type Settlement = {
   paid: boolean;
 };
 
-export type LedgerCycleStatus = "open" | "settled" | "archived_unpaid";
+export type LedgerCycleStatus = "archived_unpaid" | "settled";
 
 export type LedgerCycle = {
   id: string;
@@ -122,6 +125,19 @@ export type LedgerCycle = {
   createdAt: string;
   closedAt?: string;
   closedByUserId?: string;
+  // Per-viewer: is this cycle the one shown on the viewer's home screen, do
+  // they own it, and (if not) whose cycle is it — a cycle is shared with
+  // every user-participant of the bills inside it, not just its owner.
+  // Exactly one of the viewer's cycles has active=true at a time.
+  active: boolean;
+  isOwner: boolean;
+  ownerDisplayName: string;
+  ownerAvatarUrl?: string;
+  // Balance-overview fields (Issue 3), present on listCycles() results only.
+  // viewerNet: >0 = viewer is owed money, <0 = viewer owes money.
+  viewerNet?: number;
+  totalAmount?: number;
+  unpaidCount?: number;
 };
 
 export type SettlementSnapshot = {
@@ -156,9 +172,21 @@ export type AuditLogEntry = {
   createdAt: string;
 };
 
+export type LedgerCycleMemberInfo = {
+  memberId: string;
+  displayName: string;
+  avatarUrl: string;
+  isUser: boolean;
+};
+
 export type LedgerCycleDetail = {
   cycle: LedgerCycle;
   expenses: Expense[];
   settlements: SettlementSnapshot[];
   auditLogs: AuditLogEntry[];
+  // Resolves every member id (owner, payers, participants, audit actors)
+  // that appears in this cycle to a display name/avatar, keyed by member id
+  // (e.g. "user:<id>" / "contact:<id>"). Needed because a shared cycle can
+  // reference user ids that aren't in the viewer's own friends/contacts.
+  members: Record<string, LedgerCycleMemberInfo>;
 };

@@ -124,7 +124,7 @@ export async function getAvatarUploadSignature(): Promise<AvatarUploadSignature>
   return fetchJson<AvatarUploadSignature>("/api/me/avatar/signature", { method: "POST" });
 }
 
-export async function uploadAvatarToCloudinary(file: File, signature: AvatarUploadSignature): Promise<string> {
+export async function uploadImageToCloudinary(file: File, signature: AvatarUploadSignature): Promise<string> {
   const form = new FormData();
   form.append("file", file);
   form.append("api_key", signature.apiKey);
@@ -144,6 +144,9 @@ export async function uploadAvatarToCloudinary(file: File, signature: AvatarUplo
   const data = await response.json();
   return data.secure_url as string;
 }
+
+// Kept as an alias — existing callers (avatar picker) still read naturally as "upload avatar".
+export const uploadAvatarToCloudinary = uploadImageToCloudinary;
 
 export async function getBillTemplates(): Promise<BillTitleTemplate[]> {
   return fetchJson<BillTitleTemplate[]>("/api/me/bill-templates");
@@ -193,12 +196,14 @@ export async function deleteGroup(groupId: string): Promise<void> {
   await fetchJson<void>(`/api/groups/${groupId}`, { method: "DELETE" });
 }
 
-// ----------------- Ledger (personal, per-user) -----------------
+// ----------------- Ledger (shared: a cycle is visible to every -----------------
+// -------------------- user-participant of the bills inside it) --------------------
 
 export async function getCurrentLedgerCycle(): Promise<LedgerCycleDetail> {
   return fetchJson<LedgerCycleDetail>("/api/ledger/current");
 }
 
+// All cycles the current user is a member of (their own + shared-in).
 export async function getLedgerCycles(): Promise<LedgerCycle[]> {
   return fetchJson<LedgerCycle[]>("/api/ledger/cycles");
 }
@@ -207,15 +212,27 @@ export async function getLedgerCycleDetail(cycleId: string): Promise<LedgerCycle
   return fetchJson<LedgerCycleDetail>(`/api/ledger/cycles/${cycleId}`);
 }
 
-export async function settleCurrentLedgerCycle(): Promise<LedgerCycleDetail> {
-  return fetchJson<LedgerCycleDetail>("/api/ledger/current/settle", { method: "POST" });
+export async function settleLedgerCycle(cycleId: string): Promise<LedgerCycleDetail> {
+  return fetchJson<LedgerCycleDetail>(`/api/ledger/cycles/${cycleId}/settle`, { method: "POST" });
 }
 
-export async function archiveCurrentLedgerCycle(): Promise<LedgerCycleDetail> {
-  return fetchJson<LedgerCycleDetail>("/api/ledger/current/archive", { method: "POST" });
+export async function archiveLedgerCycle(cycleId: string): Promise<LedgerCycleDetail> {
+  return fetchJson<LedgerCycleDetail>(`/api/ledger/cycles/${cycleId}/archive`, { method: "POST" });
 }
 
-// ----------------- Expenses (personal, per-user) -----------------
+// "Hủy tất toán" — reopens a settled/archived cycle so bills can be added/edited again.
+export async function reopenLedgerCycle(cycleId: string): Promise<LedgerCycleDetail> {
+  return fetchJson<LedgerCycleDetail>(`/api/ledger/cycles/${cycleId}/reopen`, { method: "POST" });
+}
+
+// "Đưa lên trang chủ" — per-viewer: activates this cycle on the viewer's home
+// screen, swapping off whichever cycle was previously active for them. Does
+// not affect any other member.
+export async function setActiveLedgerCycle(cycleId: string): Promise<LedgerCycleDetail> {
+  return fetchJson<LedgerCycleDetail>(`/api/ledger/cycles/${cycleId}/set-active`, { method: "POST" });
+}
+
+// ----------------- Expenses (shared with every member of the bill's cycle) -----------------
 
 export async function getExpenses(): Promise<Expense[]> {
   return fetchJson<Expense[]>("/api/expenses");
@@ -237,6 +254,10 @@ export async function updateExpense(expenseId: string, expense: Expense): Promis
 
 export async function deleteExpense(expenseId: string): Promise<void> {
   await fetchJson<void>(`/api/expenses/${expenseId}`, { method: "DELETE" });
+}
+
+export async function getBillPhotoUploadSignature(): Promise<AvatarUploadSignature> {
+  return fetchJson<AvatarUploadSignature>("/api/expenses/photo/signature", { method: "POST" });
 }
 
 // ----------------- Settlements -----------------

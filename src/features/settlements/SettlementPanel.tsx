@@ -1,22 +1,22 @@
-import { Check, CheckCircle2, Plus } from "lucide-react";
+import { Check, CheckCircle2, Loader2, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { formatVnd, formatVndInput, parseVndInput } from "../../lib/money/format";
 import { participantAvatar, participantName, type ParticipantMap } from "../../lib/participants";
-import type { Settlement, LedgerCycle, Expense, AuditLogEntry } from "../../types/sharebill";
-import { LedgerDetailModal } from "./LedgerDetailModal";
+import type { Settlement, LedgerCycle, Expense, AuditLogEntry, LedgerCycleMemberInfo } from "../../types/sharebill";
 
 type SettlementPanelProps = {
   participantMap: ParticipantMap;
   ledgerCycle: LedgerCycle;
   expenses: Expense[];
   auditLogs: AuditLogEntry[];
+  members: Record<string, LedgerCycleMemberInfo>;
   settlements: Settlement[];
   currentMemberId: string;
-  onMarkPaid: (settlementId: string) => void;
-  onAdjustSettlement: (settlementId: string, deltaAmount: number) => void;
-  onOpenDetail: () => void;
-  onSettleLedger: () => void;
-  onArchiveLedger: () => void;
+  onMarkPaid: (settlementId: string) => Promise<void>;
+  onAdjustSettlement: (settlementId: string, deltaAmount: number) => Promise<void>;
+  onSettleLedger: () => Promise<void>;
+  onArchiveLedger: () => Promise<void>;
+  onReopenLedger: () => Promise<void>;
 };
 
 type SettlementTab = "transactions" | "balances";
@@ -31,13 +31,14 @@ export function SettlementPanel({
   ledgerCycle,
   expenses,
   auditLogs,
+  members,
   settlements,
   currentMemberId,
   onMarkPaid,
   onAdjustSettlement,
-  onOpenDetail,
   onSettleLedger,
-  onArchiveLedger
+  onArchiveLedger,
+  onReopenLedger
 }: SettlementPanelProps) {
   const [activeTab, setActiveTab] = useState<SettlementTab>("balances");
   const [adjustingSettlement, setAdjustingSettlement] = useState<Settlement | null>(null);
@@ -45,7 +46,26 @@ export function SettlementPanel({
   const [adjustmentMode, setAdjustmentMode] = useState<AdjustmentMode>("decrease");
   const [adjustmentAmount, setAdjustmentAmount] = useState(0);
   const [counterpartyId, setCounterpartyId] = useState("");
-  const [showDetail, setShowDetail] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [markingId, setMarkingId] = useState<string | null>(null);
+
+  async function runPending(action: () => Promise<void>) {
+    setPending(true);
+    try {
+      await action();
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function handleMarkPaid(settlementId: string) {
+    setMarkingId(settlementId);
+    try {
+      await onMarkPaid(settlementId);
+    } finally {
+      setMarkingId(null);
+    }
+  }
 
   const allParticipantIds = useMemo(() => Array.from(participantMap.keys()), [participantMap]);
 
@@ -111,10 +131,12 @@ export function SettlementPanel({
     setAdjustmentAmount(0);
   }
 
-  function submitAdjustment() {
+  async function submitAdjustment() {
     if (adjustingSettlement) {
       if (adjustmentAmount <= 0) return;
-      onAdjustSettlement(adjustingSettlement.id, adjustmentMode === "increase" ? adjustmentAmount : -adjustmentAmount);
+      await runPending(() =>
+        onAdjustSettlement(adjustingSettlement.id, adjustmentMode === "increase" ? adjustmentAmount : -adjustmentAmount)
+      );
     }
 
     if (adjustingBalance) {
@@ -123,7 +145,7 @@ export function SettlementPanel({
       const pairKey = balanceIsDebtor
         ? `${adjustingBalance.memberId}->${counterpartyId}`
         : `${counterpartyId}->${adjustingBalance.memberId}`;
-      onAdjustSettlement(pairKey, adjustmentMode === "increase" ? adjustmentAmount : -adjustmentAmount);
+      await runPending(() => onAdjustSettlement(pairKey, adjustmentMode === "increase" ? adjustmentAmount : -adjustmentAmount));
     }
 
     setAdjustingSettlement(null);
@@ -146,27 +168,36 @@ export function SettlementPanel({
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-3 gap-2">
-        <button
-          className="h-10 rounded-[8px] bg-white/[0.05] text-sm font-semibold text-mist hover:bg-white/[0.08]"
-          onClick={() => setShowDetail(true)}
-        >
-          Chi tiết
-        </button>
-        <button
-          className="h-10 rounded-[8px] bg-mist text-sm font-semibold text-ink disabled:opacity-50"
-          disabled={expenses.length === 0 && settlements.length === 0}
-          onClick={onSettleLedger}
-        >
-          Tất toán
-        </button>
-        <button
-          className="h-10 rounded-[8px] border border-white/10 bg-transparent text-sm font-semibold text-white/60 hover:text-white disabled:opacity-50"
-          disabled={expenses.length === 0 && settlements.length === 0}
-          onClick={onArchiveLedger}
-        >
-          Lưu trữ
-        </button>
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        {ledgerCycle.status === "archived_unpaid" ? (
+          <>
+            <button
+              className="flex h-10 items-center justify-center gap-1.5 rounded-[8px] bg-mist text-sm font-semibold text-ink disabled:opacity-50"
+              disabled={pending || (expenses.length === 0 && settlements.length === 0)}
+              onClick={() => runPending(onSettleLedger)}
+            >
+              {pending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              Tất toán
+            </button>
+            <button
+              className="flex h-10 items-center justify-center gap-1.5 rounded-[8px] border border-white/10 bg-transparent text-sm font-semibold text-white/60 hover:text-white disabled:opacity-50"
+              disabled={pending || (expenses.length === 0 && settlements.length === 0)}
+              onClick={() => runPending(onArchiveLedger)}
+            >
+              {pending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              Lưu trữ
+            </button>
+          </>
+        ) : (
+          <button
+            className="col-span-2 flex h-10 items-center justify-center gap-1.5 rounded-[8px] border border-white/10 bg-transparent text-sm font-semibold text-white/60 hover:text-white disabled:opacity-50"
+            disabled={pending}
+            onClick={() => runPending(onReopenLedger)}
+          >
+            {pending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            Hủy tất toán
+          </button>
+        )}
       </div>
 
       <div className="mt-5">
@@ -236,13 +267,14 @@ export function SettlementPanel({
                       </div>
 
                       <button
-                        className={`grid shrink-0 h-7 w-7 place-items-center rounded-full border border-white/40 bg-white/[0.05] transition-colors active:scale-95 ${settlement.paid ? "text-mint border-mint" : "text-mint/70"
+                        className={`grid shrink-0 h-7 w-7 place-items-center rounded-full border border-white/40 bg-white/[0.05] transition-colors active:scale-95 disabled:opacity-50 ${settlement.paid ? "text-mint border-mint" : "text-mint/70"
                           }`}
                         type="button"
                         title={settlement.paid ? "Hoàn tác đã trả" : "Đánh dấu đã trả xong"}
-                        onClick={() => onMarkPaid(settlement.id)}
+                        disabled={markingId === settlement.id}
+                        onClick={() => handleMarkPaid(settlement.id)}
                       >
-                        <Check className="h-3.5 w-3.5" />
+                        {markingId === settlement.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                       </button>
                     </div>
 
@@ -298,20 +330,24 @@ export function SettlementPanel({
                         <Plus className="h-4 w-4" />
                       </button>
                       <button
-                        className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-white/55 transition-colors hover:bg-white/10"
+                        className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-white/55 transition-colors hover:bg-white/10 disabled:opacity-50"
                         type="button"
                         title="Đánh dấu các khoản liên quan đã trả"
-                        onClick={() => {
-                          settlements
-                            .filter(
+                        disabled={pending}
+                        onClick={() =>
+                          runPending(async () => {
+                            const related = settlements.filter(
                               (settlement) =>
                                 !settlement.paid &&
                                 (settlement.fromMemberId === balance.memberId || settlement.toMemberId === balance.memberId)
-                            )
-                            .forEach((settlement) => onMarkPaid(settlement.id));
-                        }}
+                            );
+                            for (const settlement of related) {
+                              await onMarkPaid(settlement.id);
+                            }
+                          })
+                        }
                       >
-                        <CheckCircle2 className="h-4 w-4" />
+                        {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                       </button>
                     </>
                   ) : (
@@ -429,16 +465,6 @@ export function SettlementPanel({
         </div>
       )}
 
-      {showDetail && (
-        <LedgerDetailModal
-          participantMap={participantMap}
-          detail={{ cycle: ledgerCycle, expenses, auditLogs, settlements: [] }}
-          settlements={settlements}
-          currentMemberId={currentMemberId}
-          onClose={() => setShowDetail(false)}
-          readonly={false}
-        />
-      )}
     </section>
   );
 }
