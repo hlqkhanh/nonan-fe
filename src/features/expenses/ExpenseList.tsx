@@ -40,7 +40,7 @@ export function ExpenseList({ expenses, selectedDate, readonly, onEditExpense, o
   const bills = expenses.filter((expense) => expense.paidDate.slice(0, 10) === selectedDate);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<string[]>([]);
-  const [isSectionExpanded, setIsSectionExpanded] = useState(true);
+  const [isSectionExpanded, setIsSectionExpanded] = useState<boolean>(true);
 
   async function handleDelete(expenseId: string) {
     if (!onDeleteExpense) return;
@@ -61,16 +61,15 @@ export function ExpenseList({ expenses, selectedDate, readonly, onEditExpense, o
   return (
     <section className="px-4 pt-5">
       <div 
-        className="mb-3 flex items-center justify-between cursor-pointer select-none"
+        className="mb-3 flex items-center justify-between cursor-pointer group"
         onClick={() => setIsSectionExpanded(!isSectionExpanded)}
       >
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold text-mist">Bill trong ngày</h2>
-          <ChevronDown className={`h-5 w-5 text-white/40 transition-transform ${isSectionExpanded ? "rotate-180" : ""}`} />
+          <h2 className="text-lg font-semibold text-mist group-hover:text-white transition-colors">Bill trong ngày</h2>
+          <ChevronDown className={`h-4 w-4 text-white/40 transition-transform ${isSectionExpanded ? "rotate-180" : ""}`} />
         </div>
         <span className="text-xs text-white/40">{selectedDate}</span>
       </div>
-      
       {isSectionExpanded && (
         <div className="space-y-2">
         {bills.length === 0 && (
@@ -103,24 +102,9 @@ export function ExpenseList({ expenses, selectedDate, readonly, onEditExpense, o
                 </div>
 
                 <div className="min-w-0 flex-1 flex gap-3 self-stretch">
-                  <div className="min-w-0 flex-1 flex flex-col pt-0.5">
-                    <div className="flex items-center justify-between gap-3 mb-1.5">
-                      <h3 className="min-w-0 truncate text-sm font-semibold text-mist leading-tight">{expense.title}</h3>
-                      <div className="flex shrink-0 items-center gap-2 text-[11px] text-white/45">
-                        <div className="flex items-center gap-1 min-w-0">
-                          <Clock3 className="h-3 w-3 shrink-0" />
-                          <span className="truncate">{formatBillDateTime(expense.paidDate)}</span>
-                        </div>
-                        <div
-                          className="flex items-center gap-1 shrink-0"
-                          title={expense.splitMode === "equal" ? "Chia đều" : "Tùy chỉnh"}
-                        >
-                          <SplitIcon className="h-3 w-3 shrink-0" />
-                          <span>{expense.participants.length}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-1 text-[11px] text-white/50">
+                  <div className="min-w-0 flex-1 flex flex-col justify-center">
+                    <h3 className="truncate text-sm font-semibold text-mist leading-tight mb-1">{expense.title}</h3>
+                    <div className="flex flex-col gap-1.5 text-[11px] text-white/50">
                       {payerSummary && (
                         <div className="flex items-center gap-1.5 min-w-0" title={`Trả bởi ${payerSummary}`}>
                           <WalletCards className="h-3.5 w-3.5 shrink-0" />
@@ -133,11 +117,24 @@ export function ExpenseList({ expenses, selectedDate, readonly, onEditExpense, o
                           <span className="truncate font-medium text-coral/90">{participantSummary}</span>
                         </div>
                       )}
+                      <div className="flex flex-wrap items-center">
+                        <div className="flex items-center gap-1.5 mr-3.5 min-w-0">
+                          <Clock3 className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">{formatBillDateTime(expense.paidDate)}</span>
+                        </div>
+                        <div
+                          className="flex items-center gap-1.5 shrink-0"
+                          title={expense.splitMode === "equal" ? "Chia đều" : "Tùy chỉnh"}
+                        >
+                          <SplitIcon className="h-3.5 w-3.5 shrink-0" />
+                          <span>{expense.participants.length}</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="flex shrink-0 flex-col items-end justify-between pt-0.5">
-                    <span className="text-sm font-bold text-mist">{formatVnd(expense.totalAmount)}</span>
+                  <div className="flex shrink-0 flex-col items-end justify-between">
+                    <span className="text-sm font-bold text-mist mt-0.5">{formatVnd(expense.totalAmount)}</span>
                     <div className="flex items-center gap-0.5 -mr-1.5 -mb-1 mt-1">
                       {!readonly && onEditExpense && (
                         <button
@@ -247,7 +244,7 @@ export function ExpenseList({ expenses, selectedDate, readonly, onEditExpense, o
             </article>
           );
         })}
-        </div>
+      </div>
       )}
     </section>
   );
