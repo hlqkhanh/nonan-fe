@@ -20,6 +20,7 @@ import {
 import { useAuth } from "../auth/AuthContext";
 import { AuthScreen } from "../features/auth/AuthScreen";
 import { AddExpenseModal } from "../features/expenses/AddExpenseModal";
+import { ExpenseList } from "../features/expenses/ExpenseList";
 import { CycleWorkspace } from "../features/settlements/CycleWorkspace";
 import { WeeklyCalendar } from "../features/calendar/WeeklyCalendar";
 import { LedgerPage } from "../features/ledger/LedgerPage";
@@ -237,6 +238,14 @@ export function App() {
               )}
 
               <WeeklyCalendar expenses={currentLedgerDetail.expenses} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
+
+              <ExpenseList
+                expenses={currentLedgerDetail.expenses}
+                selectedDate={selectedDate}
+                readonly={currentLedgerDetail.cycle.status === "settled"}
+                onEditExpense={openEditExpense}
+                onDeleteExpense={handleDeleteExpense}
+              />
 
               <CycleWorkspace
                 detail={currentLedgerDetail}

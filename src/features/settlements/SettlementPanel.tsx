@@ -1,4 +1,4 @@
-import { Check, CheckCircle2, Loader2, Plus } from "lucide-react";
+import { Archive, Check, CheckCircle2, Loader2, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { formatVnd, formatVndInput, parseVndInput } from "../../lib/money/format";
 import { participantAvatar, participantName, type ParticipantMap } from "../../lib/participants";
@@ -168,33 +168,33 @@ export function SettlementPanel({
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-2">
+      <div className="mt-4 grid grid-cols-2 gap-3">
         {ledgerCycle.status === "archived_unpaid" ? (
           <>
             <button
-              className="flex h-10 items-center justify-center gap-1.5 rounded-[8px] bg-mist text-sm font-semibold text-ink disabled:opacity-50"
+              className="flex h-12 items-center justify-center gap-2 rounded-[8px] bg-mist text-sm font-bold text-ink shadow-lg shadow-black/20 transition active:scale-[0.98] disabled:opacity-50"
               disabled={pending || (expenses.length === 0 && settlements.length === 0)}
               onClick={() => runPending(onSettleLedger)}
             >
-              {pending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
               Tất toán
             </button>
             <button
-              className="flex h-10 items-center justify-center gap-1.5 rounded-[8px] border border-white/10 bg-transparent text-sm font-semibold text-white/60 hover:text-white disabled:opacity-50"
+              className="flex h-12 items-center justify-center gap-2 rounded-[8px] border border-white/16 bg-white/[0.035] text-sm font-bold text-mist shadow-lg shadow-black/10 transition hover:border-white/28 hover:bg-white/[0.07] active:scale-[0.98] disabled:opacity-50"
               disabled={pending || (expenses.length === 0 && settlements.length === 0)}
               onClick={() => runPending(onArchiveLedger)}
             >
-              {pending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />}
               Lưu trữ
             </button>
           </>
         ) : (
           <button
-            className="col-span-2 flex h-10 items-center justify-center gap-1.5 rounded-[8px] border border-white/10 bg-transparent text-sm font-semibold text-white/60 hover:text-white disabled:opacity-50"
+            className="col-span-2 flex h-12 items-center justify-center gap-2 rounded-[8px] border border-white/16 bg-white/[0.035] text-sm font-bold text-mist shadow-lg shadow-black/10 transition hover:border-white/28 hover:bg-white/[0.07] active:scale-[0.98] disabled:opacity-50"
             disabled={pending}
             onClick={() => runPending(onReopenLedger)}
           >
-            {pending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {pending && <Loader2 className="h-4 w-4 animate-spin" />}
             Hủy tất toán
           </button>
         )}
