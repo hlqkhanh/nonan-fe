@@ -15,6 +15,13 @@ import type {
 } from "../types/sharebill";
 
 const TOKEN_KEY = "sharebill.token";
+const viteEnv = import.meta as ImportMeta & { env?: { VITE_API_BASE_URL?: string } };
+const API_BASE_URL = (viteEnv.env?.VITE_API_BASE_URL ?? "https://nonan-be-express.onrender.com").replace(/\/$/, "");
+
+function apiUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${API_BASE_URL}${path}`;
+}
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -38,7 +45,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const response = await fetch(url, {
+  const response = await fetch(apiUrl(url), {
     ...init,
     headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) }
   });
@@ -349,3 +356,5 @@ export async function addFavorite(targetType: FavoriteTargetType, targetId: stri
 export async function removeFavorite(targetType: FavoriteTargetType, targetId: string): Promise<void> {
   await fetchJson<void>(`/api/favorites/${targetType}/${targetId}`, { method: "DELETE" });
 }
+
+
