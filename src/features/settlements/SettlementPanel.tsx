@@ -261,7 +261,7 @@ export function SettlementPanel({
                       </button>
 
                       <div className="w-[120px] shrink-0 text-center">
-                        <span className="text-[22px] font-black tracking-tight text-white drop-shadow-lg leading-none">
+                        <span className={`text-[22px] font-black tracking-tight text-white drop-shadow-lg leading-none ${settlement.paid ? "line-through opacity-60" : ""}`}>
                           {formatVnd(settlement.amount)}
                         </span>
                       </div>
@@ -351,9 +351,26 @@ export function SettlementPanel({
                       </button>
                     </>
                   ) : (
-                    <div className="grid h-9 w-9 place-items-center">
-                      <CheckCircle2 className="h-5 w-5 text-mint" />
-                    </div>
+                    <button
+                      className="grid h-9 w-9 place-items-center rounded-full border border-mint/20 bg-mint/10 text-mint transition-colors hover:bg-mint/15 disabled:opacity-50"
+                      type="button"
+                      title="Hoàn tác các khoản đã trả liên quan"
+                      disabled={pending}
+                      onClick={() =>
+                        runPending(async () => {
+                          const related = settlements.filter(
+                            (settlement) =>
+                              settlement.paid &&
+                              (settlement.fromMemberId === balance.memberId || settlement.toMemberId === balance.memberId)
+                          );
+                          for (const settlement of related) {
+                            await onMarkPaid(settlement.id);
+                          }
+                        })
+                      }
+                    >
+                      {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-5 w-5" />}
+                    </button>
                   )}
                 </div>
               );
